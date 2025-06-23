@@ -1,0 +1,16 @@
+# Core Libraries
+pandas
+numpy
+scipy
+
+# Bioinformatics
+bcbio-gff
+pyBigWig
+
+# Machine Learning
+torch
+scikit-learn
+
+# Visualization
+matplotlib
+seaborn
