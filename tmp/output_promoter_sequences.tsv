@@ -1,0 +1,11 @@
+gene_id	chromosome	promoter_start	promoter_end	strand	promoter_dna_sequence
+gene1	chr1	0	10	+	AGCTAGCTAG
+gene2	chr1	10	20	-	AACTAACTAA
+gene3	chr1	20	30	+	CCGGCCGGCC
+gene4	chr1	30	40	-	TTAATTAATT
+gene5	chr1	40	50	+	GGCGCGGCGC
+gene6	chr2	0	10	+	TCGATCGATC
+gene7	chr2	10	20	-	GTTCCGTTCC
+gene8	chr2	20	30	+	AATTCCAATT
+gene9	chr2	30	40	-	GGCCTTGGCC
+gene10	chr2	40	50	+	TTCGAATTCG

@@ -1,0 +1,10 @@
+chr1	0	10	gene1	0	+
+chr1	10	20	gene2	0	-
+chr1	20	30	gene3	0	+
+chr1	30	40	gene4	0	-
+chr1	40	50	gene5	0	+
+chr2	0	10	gene6	0	+
+chr2	10	20	gene7	0	-
+chr2	20	30	gene8	0	+
+chr2	30	40	gene9	0	-
+chr2	40	50	gene10	0	+
