@@ -2,14 +2,15 @@
 
 ## 1. Objective
 
-The objective of this module is to implement the core predictive engine of the project: the Siamese transformer model. This involves translating the architectural design specified in the research plan into clean, efficient, and well-documented code using a modern deep learning framework.
+The objective of this module is to implement the core predictive engine of the project: the Siamese transformer model. This model will predict gene co-expression correlation coefficients. It involves translating the architectural design into clean, efficient, and well-documented PyTorch code, tailored to process the per-base concatenated feature vectors (DNA one-hot encoding + TF affinities) generated in Module 2.
 
 ## 2. Key Responsibilities
 
--   Build the overall Siamese network structure, which processes two gene promoter profiles in parallel.
--   Implement the transformer encoder blocks, which are the heart of the feature extraction process.
--   Construct the final classifier head that takes the outputs from the Siamese towers and makes a co-expression prediction.
--   Ensure the model code is modular, reusable, and adheres to best practices for the chosen framework.
+-   Build the overall Siamese network structure, which processes two gene promoter profiles (sequences of concatenated per-base feature vectors) in parallel using shared weights.
+-   Implement an input projection layer to map the heterogeneous concatenated per-base feature vectors into a homogeneous embedding space suitable for the transformer.
+-   Implement the transformer encoder blocks, which are the heart of the feature extraction process from these sequences.
+-   Construct the final regression head that takes the outputs from the Siamese towers and predicts a numerical co-expression correlation coefficient.
+-   Ensure the model code is modular, reusable, and adheres to best practices in PyTorch.
 
 ## 3. Detailed Architectural and Implementation Steps
 
@@ -17,58 +18,63 @@ The objective of this module is to implement the core predictive engine of the p
 
 -   **Concept:** The model will be a "Siamese network," meaning it will have two identical sub-networks (towers) that share the same weights.
 -   **Process:**
-    1.  Create a main model class (e.g., `SiameseTransformer`).
-    2.  This class will instantiate a single `TransformerEncoder` module.
-    3.  In the `forward` pass, the model will accept two inputs: `promoter_A` and `promoter_B`.
-    4.  `promoter_A` will be passed through the `TransformerEncoder` to produce an embedding vector `embedding_A`.
-    5.  `promoter_B` will be passed through the **same** `TransformerEncoder` instance to produce `embedding_B`.
-    6.  These two embeddings will then be passed to the classifier head.
+    1.  Create a main model class (e.g., `SiameseGeneTransformer`).
+    2.  This class will instantiate a single `PromoterTransformerEncoder` module (detailed in Step 3.2).
+    3.  In the `forward` pass, the model will accept two inputs: `promoter_sequence_A` and `promoter_sequence_B`. Each input is a batch of sequences of concatenated per-base feature vectors from Module 2.
+    4.  `promoter_sequence_A` will be passed through the `PromoterTransformerEncoder` to produce an embedding vector `embedding_A`.
+    5.  `promoter_sequence_B` will be passed through the **same** `PromoterTransformerEncoder` instance to produce `embedding_B`.
+    6.  These two embeddings will then be passed to the regression head.
 
-### Step 3.2: The Transformer Encoder Tower
+### Step 3.2: The Promoter Transformer Encoder Tower
 
-This is the core component that processes a single promoter's "TF vocabulary" sequence.
+This is the core component that processes a single promoter's sequence of concatenated per-base feature vectors.
 
--   **Input:** A tensor of shape `(batch_size, num_windows, num_tfs)`, e.g., `(64, 99, ~300)`.
+-   **Input:** A tensor of shape `(batch_size, sequence_length, feature_dimension)`.
+    -   `sequence_length`: The length of the promoter sequence (e.g., `MAX_PROMOTER_LENGTH` if padded/truncated in Module 2).
+    -   `feature_dimension`: The dimensionality of the concatenated per-base feature vector (e.g., `4 (DNA one-hot) + Number_of_TFs (~300)`).
 -   **Components:**
-    1.  **Input Projection Layer (Optional but Recommended):** A linear layer that projects the input `num_tfs` dimension to the model's hidden dimension (`d_model`). This allows the model to learn a richer initial representation.
-        -   `Linear(in_features=num_tfs, out_features=d_model)`
-    2.  **Positional Encoding:** The transformer needs explicit positional information. Add a standard sinusoidal or a learned positional encoding to the sequence embeddings. The encoding should have the same dimension as `d_model`.
-    3.  **Transformer Encoder Layers:** The main body of the tower. This will be a stack of `N` identical encoder blocks.
+    1.  **Input Projection Layer:** A linear layer that projects the input `feature_dimension` to the model's hidden dimension (`d_model`). This is crucial for handling the concatenated (DNA + TF affinity) vectors and allowing the model to learn a rich initial representation.
+        -   `Linear(in_features=feature_dimension, out_features=d_model)`
+    2.  **Positional Encoding:** The transformer needs explicit positional information for the sequence. Add a standard sinusoidal or a learned positional encoding to the sequence embeddings. The encoding should have the same dimension as `d_model`.
+    3.  **Transformer Encoder Layers:** The main body of the tower. This will be a stack of `N` identical encoder blocks (e.g., using `torch.nn.TransformerEncoderLayer`).
         -   Each block contains:
             -   A **Multi-Head Self-Attention** layer.
             -   A **Feed-Forward Network** (typically two linear layers with a ReLU or GeLU activation).
             -   Layer normalization and residual connections (dropout is also applied here for regularization).
-    4.  **Output Aggregation:** The encoder will output a sequence of hidden states. Aggregate these into a single fixed-size vector for the entire promoter.
-        -   **Recommendation:** Prepend a special `[CLS]` token to the input sequence and use the corresponding output hidden state as the final promoter embedding. Alternatively, use mean pooling over all output hidden states.
+    4.  **Output Aggregation:** The encoder will output a sequence of hidden states of shape `(batch_size, sequence_length, d_model)`. Aggregate these into a single fixed-size vector for the entire promoter.
+        -   **Recommendation:** Prepend a special `[CLS]` token to the input sequence (its initial embedding can be learned or be an average/zeroed version of the projection layer's output over the actual sequence features, then passed through the projection layer). Use the corresponding output hidden state of this `[CLS]` token as the final promoter embedding.
+        -   Alternatively, use mean pooling over all output hidden states of the actual sequence.
 -   **Output:** A tensor of shape `(batch_size, d_model)`, representing the learned embedding for the promoter.
 
-### Step 3.3: The Classifier Head
+### Step 3.3: The Regression Head
 
--   **Input:** The two promoter embeddings from the towers, `embedding_A` and `embedding_B`.
+-   **Input:** The two promoter embeddings from the towers, `embedding_A` and `embedding_B` (each of shape `(batch_size, d_model)`).
 -   **Process:**
-    1.  **Combine Embeddings:** Combine the two embeddings to capture their relationship. A robust strategy is to concatenate the two vectors along with their element-wise difference:
+    1.  **Combine Embeddings:** Combine the two embeddings to capture their relationship and differences. A robust strategy is to concatenate the two vectors along with their element-wise absolute difference:
         -   `combined_vector = concat(embedding_A, embedding_B, abs(embedding_A - embedding_B))`
-    2.  **Classification Layers:** Pass the `combined_vector` through a small multi-layer perceptron (MLP).
-        -   For example: `Linear -> ReLU -> Dropout -> Linear -> Sigmoid`.
-        -   The final layer must have a single output neuron and a sigmoid activation function to produce a probability score between 0 and 1.
--   **Output:** A single value per input pair, representing the predicted probability of co-expression.
+        -   This results in a vector of shape `(batch_size, 3 * d_model)`.
+    2.  **Regression Layers:** Pass the `combined_vector` through a small multi-layer perceptron (MLP) to predict the co-expression correlation coefficient.
+        -   For example: `Linear -> ReLU -> Dropout -> Linear`.
+        -   The final linear layer must have a single output neuron. No activation function is typically applied here for standard regression, allowing the output to be any real number. If correlation coefficients are strictly scaled (e.g., to [-1, 1]), a `tanh` activation could be considered for the final output.
+-   **Output:** A single scalar value per input pair `(batch_size, 1)`, representing the predicted co-expression correlation coefficient.
 
 ## 4. Recommended Libraries and Frameworks
 
--   **`PyTorch` (Recommended)** or **`TensorFlow`**: Choose one framework and stick with it. PyTorch is often favored for its flexibility in research and custom model development.
-    -   Use `torch.nn.TransformerEncoder` and `torch.nn.TransformerEncoderLayer` as building blocks in PyTorch.
--   **`NumPy`**: For any necessary numerical operations.
+-   **`PyTorch` (Recommended)**: Utilize `torch.nn.Module`, `torch.nn.Linear`, `torch.nn.TransformerEncoder`, and `torch.nn.TransformerEncoderLayer` as building blocks.
+-   **`NumPy`**: For any necessary numerical operations, though PyTorch tensors will be primary.
 
 ## 5. Key Hyperparameters to Expose
 
 Your model implementation should make it easy to configure the following hyperparameters:
 
--   `d_model`: The hidden size of the model (e.g., 256).
--   `nhead`: The number of attention heads (e.g., 8).
--   `num_encoder_layers`: The number of layers in the transformer towers (e.g., 4).
--   `dim_feedforward`: The dimension of the feed-forward network (e.g., 1024).
--   `dropout`: The dropout rate (e.g., 0.1).
+-   `input_feature_dim`: The dimension of the concatenated per-base input vector (e.g., `4 + Number_of_TFs`).
+-   `d_model`: The hidden size of the model (e.g., 256 or 512).
+-   `nhead`: The number of attention heads in multi-head attention (e.g., 4 or 8).
+-   `num_encoder_layers`: The number of layers in the transformer towers (e.g., 3 to 6).
+-   `dim_feedforward`: The dimension of the feed-forward network within each transformer encoder layer (e.g., 1024 or 2048).
+-   `dropout`: The dropout rate used in various parts of the model (e.g., 0.1 to 0.3).
+-   `aggregation_method`: Method for pooling transformer outputs (e.g., 'cls' or 'mean').
 
 ## 6. Success Criteria
 
-This module is complete when there is a fully implemented, well-documented Python script containing the `SiameseTransformer` model. The script should be runnable, and it should be possible to instantiate the model and perform a forward pass with dummy data of the correct shape without errors.
+This module is complete when there is a fully implemented, well-documented Python script containing the `SiameseGeneTransformer` model in PyTorch. The script should be runnable, and it should be possible to instantiate the model and perform a forward pass with dummy data (matching the expected input shape from Module 2) without errors, producing an output tensor of shape `(batch_size, 1)` for regression.

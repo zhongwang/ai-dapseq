@@ -16,10 +16,10 @@ The overall workflow is as follows:
 
 ```mermaid
 graph TD
-    A[Raw Data <br/> GFF3, FASTA, bigWig, TSV] --> B{Module 1: Data Preprocessing};
-    B --> C[Normalized TF Profiles & Labeled Gene Pairs];
+    A[Raw Data <br/> promoter BED, FASTA, bigWig, TSV] --> B{Module 1: Data Preprocessing};
+    B --> C[Per-base TF Affinities, Promoter Sequences & Gene Pair Co-expression Coefficients];
     C --> D{Module 2: TF Vocabulary Feature Engineering};
-    D --> E[Promoter "TF Vocabulary" Sequences];
+    D --> E[Promoter Sequences of Concatenated Per-Base Features];
     E --> F{Module 3: Siamese Transformer Implementation};
     F --> G[Trainable Model];
     G --> H{Module 4: Model Training & Evaluation};
@@ -32,30 +32,32 @@ graph TD
 
 ### Module 1: Data Curation and Preprocessing
 - **Lead Engineer:** TBD
-- **Objective:** To process the raw genomic and co-expression data into a clean, structured format suitable for downstream analysis.
+- **Objective:** To process the raw genomic, transcriptomic, and co-expression data into a clean, structured format suitable for per-base feature generation in Module 2.
 - **Key Responsibilities:**
-    - Ingest and parse all raw data files (GFF3, FASTA, bigWig, TSV).
-    - Define and extract promoter regions for all genes.
-    - Extract and normalize TF binding signals from DAP-seq data.
-    - Prepare the labeled dataset of co-expressed and non-co-expressed gene pairs.
-- **Deliverable:** A set of curated data files containing normalized TF binding profiles and labeled gene pairs.
+    - Ingest and parse all raw data files (promoter BED, FASTA, bigWig, TSV).
+    - Process promoter regions using the provided promoter BED file and extract corresponding DNA sequences from FASTA.
+    - Extract and normalize TF binding signals (e.g., from bigWig files) per base within the defined promoter regions.
+    - Prepare the dataset of gene pairs with co-expression correlation coefficients (provided TSV).
+- **Deliverable:** A set of curated data files containing: per-base normalized TF binding signals for promoter regions, the corresponding promoter DNA sequences, and a dataset of gene pairs with their associated co-expression correlation coefficients.
 
 ### Module 2: "TF Vocabulary" Feature Engineering
 - **Lead Engineer:** TBD
-- **Objective:** To implement the core feature engineering step of creating the "TF Vocabulary".
+- **Objective:** To implement the feature engineering process, creating input sequences by concatenating per-base DNA sequence vectors and TF-DAPseq vectors.
 - **Key Responsibilities:**
-    - Develop a robust pipeline to transform normalized TF binding profiles into sequences of "TF vocabulary" summary vectors.
-    - Implement the 50bp sliding window mechanism.
-    - Aggregate TF signals within each window to create summary vectors.
-- **Deliverable:** A dataset where each gene's promoter is represented as a sequence of TF summary vectors.
+    - Develop a pipeline to generate feature vectors for each base in the promoter regions.
+    - For each base, concatenate:
+        - A one-hot encoded DNA sequence vector (A, C, G, T), including representations for a pad token ([0,0,0,0]) and 'N' ([1,1,1,1]).
+        - A TF-DAPseq vector consisting of 300 TF binding affinity values specific to that base.
+- **Deliverable:** A dataset where each gene's promoter is represented as a sequence of these concatenated (one-hot DNA + TF affinity) feature vectors.
 
 ### Module 3: Siamese Transformer Model Implementation
 - **Lead Engineer:** TBD
-- **Objective:** To build the Siamese transformer model in PyTorch or TensorFlow.
+- **Objective:** To build the Siamese transformer model in PyTorch.
 - **Key Responsibilities:**
     - Implement the Siamese architecture with weight-sharing transformer encoders.
+    - Implement a layer to project heterogeneous input token vector into a single, unified, homogeneous embedding space that the Transformer can understand.
     - Build the core transformer encoder blocks (self-attention, feed-forward networks).
-    - Implement the classifier head for predicting co-expression.
+    - Implement the regression head for predicting co-expression.
 - **Deliverable:** A well-structured, documented, and trainable model script.
 
 ### Module 4: Model Training and Evaluation
@@ -65,17 +67,19 @@ graph TD
     - Develop the complete training, validation, and testing pipeline.
     - Implement data loaders and a gene-disjoint data splitting strategy.
     - Manage hyperparameter tuning experiments.
-    - Track and report key performance metrics (AUPRC, F1-score).
+    - Track and report key performance metrics (train/validation loss, loss type is regression against gene co-expression correlation coefficient).
+    - Implement early stopping to prevent overfitting.
+    - Test the model on the testing dataset, collect metrics (Regression loss, etc.)
 - **Deliverable:** A trained model, performance metrics, and a report on the results of the training experiments.
 
 ### Module 5: Visualization and Interpretation
 - **Lead Engineer:** TBD
-- **Objective:** To create tools for visualizing model performance and interpreting its predictions.
+- **Objective:** To create tools for visualizing model performance and interpreting its predictions to derive biological insights.
 - **Key Responsibilities:**
-    - Develop scripts to plot performance curves (loss, AUPRC).
-    - Implement methods to extract and visualize attention maps from the model.
-    - Generate and visualize a predicted co-expression network.
-- **Deliverable:** A suite of visualization scripts and a final report with interpreted results and biological insights.
+    - Develop scripts to plot performance curves (e.g., training/validation loss over epochs) and diagnostic plots relevant to regression (e.g., scatter plots of predicted vs. actual co-expression coefficients, residual plots).
+    - Implement methods to extract and visualize attention maps from the transformer model to understand feature importance.
+    - Generate and visualize a predicted gene co-expression network based on model outputs.
+- **Deliverable:** A suite of visualization scripts and a final report detailing interpreted results, model understanding, and biological insights.
 
 ## 4. Collaboration and Version Control
 
