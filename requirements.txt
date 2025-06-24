@@ -5,7 +5,6 @@ scipy
 
 # Bioinformatics
 biopython
-bcbio-gff
 pyBigWig
 
 # Machine Learning
