@@ -374,7 +374,7 @@ if __name__ == '__main__':
         # Scheduler will only be used if val_loader is available
         scheduler = None
         if val_loader:
-    scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=LR_SCHEDULER_PATIENCE, factor=0.1)
+            scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=LR_SCHEDULER_PATIENCE, factor=0.1)
             print("ReduceLROnPlateau LR scheduler configured.")
         else:
             print("No validation data, so ReduceLROnPlateau scheduler will not be used.")
