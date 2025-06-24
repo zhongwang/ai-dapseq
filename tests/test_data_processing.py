@@ -18,10 +18,10 @@ class TestStep1ExtractPromoterSequences(unittest.TestCase):
         # Create a dummy FASTA file
         self.fasta_file = os.path.join(self.temp_dir.name, "dummy_genome.fasta")
         with open(self.fasta_file, "w") as f:
-            f.write(">chr1\\n")
-            f.write("AGCTAGCTAGTTAGTTAGTTCCGGCCGGCCAATTAATTAAGGCGCGGCGC\\n") # 50bp
-            f.write(">chr2\\n")
-            f.write("TCGATCGATCGGAACGGAACAATTCCAATTGGCCAAGGCCTTCGAATTCG\\n") # 50bp
+            f.write(">chr1\n")
+            f.write("AGCTAGCTAGTTAGTTAGTTCCGGCCGGCCAATTAATTAAGGCGCGGCGC\n") # 50bp
+            f.write(">chr2\n")
+            f.write("TCGATCGATCGGAACGGAACAATTCCAATTGGCCAAGGCCTTCGAATTCG\n") # 50bp
 
         # Create a dummy BED file
         self.bed_file = os.path.join(self.temp_dir.name, "dummy_promoters.bed")
@@ -39,7 +39,7 @@ class TestStep1ExtractPromoterSequences(unittest.TestCase):
         ]
         with open(self.bed_file, "w") as f:
             for row in bed_data:
-                f.write("\\t".join(map(str, row)) + "\\n")
+                f.write("\t".join(map(str, row)) + "\n")
 
         self.output_file = os.path.join(self.temp_dir.name, "output_promoter_sequences.tsv")
 
@@ -75,7 +75,7 @@ class TestStep1ExtractPromoterSequences(unittest.TestCase):
 
         self.assertTrue(os.path.exists(self.output_file), "Output file was not created.")
 
-        output_df = pd.read_csv(self.output_file, sep='\\t')
+        output_df = pd.read_csv(self.output_file, sep='\t')
 
         # Sort dataframes by gene_id to ensure consistent comparison
         output_df = output_df.sort_values(by='gene_id').reset_index(drop=True)

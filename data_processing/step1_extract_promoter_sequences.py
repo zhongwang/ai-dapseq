@@ -1,4 +1,3 @@
-\
 import argparse
 import pandas as pd
 from Bio.Seq import Seq
@@ -26,7 +25,7 @@ def extract_promoter_sequences(bed_file_path, fasta_file_path, output_file_path)
         # 1. Parse BED file
         bed_df = pd.read_csv(
             bed_file_path,
-            sep='\\t',
+            sep='\t',
             header=None,
             names=['chromosome', 'start', 'end', 'gene_id', 'score', 'strand'], # Assuming standard BED6 + gene_id, strand. Adjust if format differs.
             comment='#' # Skip header lines if any
@@ -106,7 +105,7 @@ def extract_promoter_sequences(bed_file_path, fasta_file_path, output_file_path)
     # 4. Output to structured file
     output_df = pd.DataFrame(results)
     try:
-        output_df.to_csv(output_file_path, sep='\\t', index=False,
+        output_df.to_csv(output_file_path, sep='\t', index=False,
                          columns=['gene_id', 'chromosome', 'promoter_start', 'promoter_end', 'strand', 'promoter_dna_sequence'])
         print(f"Successfully wrote {len(output_df)} promoter sequences to {output_file_path}")
         print(f"Total genes processed: {processed_genes}, failed: {failed_genes}")
