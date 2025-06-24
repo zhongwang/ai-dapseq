@@ -38,10 +38,8 @@ The primary objective of this module is to process the raw genomic, transcriptom
 
 -   **Rationale:** Raw DAP-seq signals are not directly comparable across different TFs or experiments due to technical biases (e.g., sequencing depth, antibody efficiency). This step is crucial for correcting these biases.
 -   **Process (applied to the per-base signals from Step 3.2):**
-    1.  **Sequencing Depth Normalization (Example):** Calculate a scaling factor for each TF's dataset (e.g., reads per million mapped reads, or total signal across a set of reference regions) and apply it to scale the signals.
-    2.  **Background Correction (If control data is available):** If input control bigWig files (e.g., from mock IP experiments) are available for TFs, subtract their normalized signal from the respective TF signals.
-    3.  **Log Transformation (Optional but common):** Apply a transformation like `log2(x + c)` (where `c` is a small pseudocount, e.g., 1) to the signals to stabilize variance and handle skewed distributions.
-    4.  **Z-score Standardization (Across promoters for each TF):** For each TF, calculate the mean and standard deviation of its signal values across all bases of all promoters (or on a per-promoter basis, depending on strategy). Then, standardize the signals: `(signal - mean) / std_dev`.
+    1.  **Log Transformation (Optional but common):** Apply a transformation like `log2(x + c)` (where `c` is a small pseudocount, e.g., 1) to the signals to stabilize variance and handle skewed distributions.
+    2.  **Z-score Standardization (Across promoters for each TF):** For each TF, calculate the mean and standard deviation of its signal values across all bases of all promoters (or on a per-promoter basis, depending on strategy). Then, standardize the signals: `(signal - mean) / std_dev`.
 -   **Output:** A directory of `.npy` files, analogous to the output of Step 3.2, but containing the *normalized* per-base TF binding signal matrices.
 
 ### Step 3.4: Co-expression Correlation Coefficient Dataset Preparation
