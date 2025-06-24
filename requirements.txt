@@ -4,6 +4,7 @@ numpy
 scipy
 
 # Bioinformatics
+biopython
 bcbio-gff
 pyBigWig
 

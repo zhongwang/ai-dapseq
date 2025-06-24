@@ -80,7 +80,15 @@ class GenePairDataset(Dataset):
         promoter_seq1 = torch.from_numpy(promoter_seq1).float()
         promoter_seq2 = torch.from_numpy(promoter_seq2).float()
         correlation = torch.tensor(correlation, dtype=torch.float32)
-        return promoter_seq1, promoter_seq2, correlation
+
+        # Assuming promoter_seq1 and promoter_seq2 are already padded/truncated to MAX_SEQ_LEN by data_processing Step 4.
+        # The mask indicates non-padded elements (False for real, True for padded).
+        # Since they are pre-processed to a fixed length, there's no *additional* padding here,
+        # so the mask is all False.
+        mask1 = torch.zeros(promoter_seq1.shape[0], dtype=torch.bool) # seq_len is dim 0 for numpy array
+        mask2 = torch.zeros(promoter_seq2.shape[0], dtype=torch.bool)
+
+        return promoter_seq1, mask1, promoter_seq2, mask2, correlation
 
 def split_data_gene_disjoint(all_gene_pairs_df, train_frac=0.7, val_frac=0.15, random_state=42):
     genes1 = all_gene_pairs_df['gene1_id'].unique()
@@ -152,15 +160,17 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         # --- Training Phase ---
         model.train()
         running_train_loss = 0.0
-        for i, (seq_a_batch, seq_b_batch, corr_batch) in enumerate(train_loader):
-            seq_a_batch, seq_b_batch, corr_batch = \
-                seq_a_batch.to(device), seq_b_batch.to(device), corr_batch.to(device)
+        for i, (seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch) in enumerate(train_loader):
+            seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch = \
+                seq_a_batch.to(device), mask_a_batch.to(device), \
+                seq_b_batch.to(device), mask_b_batch.to(device), \
+                corr_batch.to(device)
 
             optimizer.zero_grad()
             
             try:
                 # Forward pass
-                predicted_correlations = model(seq_a_batch, seq_b_batch)
+                predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch)
                 
                 # Calculate loss
                 loss = criterion(predicted_correlations.squeeze(), corr_batch.float())
@@ -184,12 +194,14 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         running_val_loss = 0.0
         if val_loader and len(val_loader.dataset) > 0: # Ensure val_loader is provided and not empty
             with torch.no_grad():
-                for seq_a_batch, seq_b_batch, corr_batch in val_loader:
-                    seq_a_batch, seq_b_batch, corr_batch = \
-                        seq_a_batch.to(device), seq_b_batch.to(device), corr_batch.to(device)
+                for seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch in val_loader:
+                    seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch = \
+                        seq_a_batch.to(device), mask_a_batch.to(device), \
+                        seq_b_batch.to(device), mask_b_batch.to(device), \
+                        corr_batch.to(device)
                     
                     try:
-                        predicted_correlations = model(seq_a_batch, seq_b_batch)
+                        predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch)
                         loss = criterion(predicted_correlations.squeeze(), corr_batch.float())
                         running_val_loss += loss.item() * seq_a_batch.size(0)
                     except Exception as e:
@@ -300,11 +312,11 @@ if __name__ == '__main__':
         for gene_id in all_genes_in_dummy_df:
             dummy_array_path = os.path.join(dummy_feature_dir, f"{gene_id}.npy")
             if not os.path.exists(dummy_array_path):
-                 # Dynamic sequence length for dummy data to test robustness (e.g. 50-150)
-                dummy_promoter_length = np.random.randint(50, 151)
-                dummy_array = np.random.rand(dummy_promoter_length, INPUT_FEATURE_DIM).astype(np.float32)
+                # Dummy sequences should match the expected fixed length (MAX_SEQ_LEN after padding/truncation from Step 4)
+                # and feature dimension (INPUT_FEATURE_DIM).
+                dummy_array = np.random.rand(MAX_SEQ_LEN, INPUT_FEATURE_DIM).astype(np.float32)
                 np.save(dummy_array_path, dummy_array)
-        print(f"Ensured dummy .npy files (var length, dim={INPUT_FEATURE_DIM}) exist in: {dummy_feature_dir}")
+        print(f"Ensured dummy .npy files (shape: ({MAX_SEQ_LEN}, {INPUT_FEATURE_DIM})) exist in: {dummy_feature_dir}")
         current_feature_dir = dummy_feature_dir
 
     # Perform gene-disjoint split

@@ -4,6 +4,7 @@ import pandas as pd
 import numpy as np
 from sklearn.metrics import mean_squared_error, mean_absolute_error
 from scipy.stats import pearsonr
+import argparse # Added
 
 # Placeholder for loading training logs (e.g., from a CSV file)
 def load_training_logs(log_file_path):
@@ -122,35 +123,77 @@ def plot_residual_plot(predictions_df, output_path="residual_plot.png"):
     plt.close()
     print(f"SUCCESS: Residual plot saved to {output_path}")
 
-def main():
-    print("--- Running Performance Visualization Script ---")
-    # Define file paths for data (these will need to be actual paths from Module 4 outputs)
-    training_logs_path = "path/to/your/training_logs.csv" # TODO: Update this path
-    predictions_path = "path/to/your/test_predictions.csv" # TODO: Update this path
-    
-    # Define output directory for plots
-    output_dir = "/Users/zhongwang/scratch/ai-dapseq/visualization/plots" # Store plots in a sub-directory
+def parse_arguments():
+    """Parses command-line arguments."""
+    parser = argparse.ArgumentParser(description="Plot model performance metrics from training logs and prediction files.")
+    parser.add_argument("--training_logs_file", type=str, required=False,
+                        help="Path to the CSV file containing training logs (epoch, train_loss, val_loss, etc.).")
+    parser.add_argument("--predictions_file", type=str, required=False,
+                        help="Path to the CSV file containing actual vs. predicted correlations.")
+    parser.add_argument("--output_dir", type=str, default="./visualization_plots",
+                        help="Directory to save the output plots (default: ./visualization_plots).")
+    return parser.parse_args()
 
-    # Create output directory if it doesn't exist (Python 3.5+)
+def main():
+    args = parse_arguments()
+    print("--- Running Performance Visualization Script ---")
+    
+    # Use arguments for file paths and output directory
+    training_logs_path = args.training_logs_file
+    predictions_path = args.predictions_file
+    output_dir = args.output_dir
+
+    # Create output directory if it doesn't exist
     import os
     os.makedirs(output_dir, exist_ok=True)
+    print(f"INFO: Plots will be saved to: {os.path.abspath(output_dir)}")
 
     # Load data
-    # For now, using placeholder data. Replace with actual data loading.
-    logs_df = load_training_logs(training_logs_path) # Assumes this function is updated to load real data
-    predictions_df = load_model_predictions(predictions_path) # Assumes this function is updated to load real data
-
-    if logs_df is not None:
-        plot_training_curves(logs_df, output_path=os.path.join(output_dir, "training_loss_curves.png"))
-        plot_regression_metric_curves(logs_df, output_path_prefix=os.path.join(output_dir, "validation_metrics"))
+    logs_df = None
+    if training_logs_path:
+        try:
+            # User should replace load_training_logs with actual loading logic if this placeholder is insufficient
+            logs_df = load_training_logs(training_logs_path) 
+        except FileNotFoundError:
+            print(f"WARNING: Training logs file not found at {training_logs_path}. Using placeholder data for logs.")
+            logs_df = load_training_logs("placeholder_logs") # Call with a dummy path to trigger placeholder
+        except Exception as e:
+            print(f"ERROR: Could not load or parse training logs from {training_logs_path}: {e}. Using placeholder data.")
+            logs_df = load_training_logs("placeholder_logs")
     else:
-        print(f"WARNING: Could not load training logs from {training_logs_path}. Skipping training plots.")
+        print("INFO: --training_logs_file not provided. Using placeholder data for logs.")
+        logs_df = load_training_logs("placeholder_logs") # Placeholder data
 
-    if predictions_df is not None:
+    predictions_df = None
+    if predictions_path:
+        try:
+            # User should replace load_model_predictions with actual loading logic
+            predictions_df = load_model_predictions(predictions_path)
+        except FileNotFoundError:
+            print(f"WARNING: Predictions file not found at {predictions_path}. Using placeholder data for predictions.")
+            predictions_df = load_model_predictions("placeholder_predictions") # Placeholder data
+        except Exception as e:
+            print(f"ERROR: Could not load or parse predictions from {predictions_path}: {e}. Using placeholder data.")
+            predictions_df = load_model_predictions("placeholder_predictions")
+    else:
+        print("INFO: --predictions_file not provided. Using placeholder data for predictions.")
+        predictions_df = load_model_predictions("placeholder_predictions") # Placeholder data
+
+    if logs_df is not None and not logs_df.empty:
+        plot_training_curves(logs_df, output_path=os.path.join(output_dir, "training_loss_curves.png"))
+        # Check if metric columns exist before plotting
+        if 'val_pearson_r' in logs_df.columns and 'val_mae' in logs_df.columns:
+            plot_regression_metric_curves(logs_df, output_path_prefix=os.path.join(output_dir, "validation_metrics"))
+        else:
+            print("WARNING: 'val_pearson_r' or 'val_mae' not found in training logs. Skipping regression metric plots.")
+    else:
+        print(f"WARNING: No training log data to plot. Logs path was: {training_logs_path}")
+
+    if predictions_df is not None and not predictions_df.empty:
         plot_predicted_vs_actual(predictions_df, output_path=os.path.join(output_dir, "predicted_vs_actual.png"))
         plot_residual_plot(predictions_df, output_path=os.path.join(output_dir, "residual_plot.png"))
     else:
-        print(f"WARNING: Could not load predictions from {predictions_path}. Skipping prediction plots.")
+        print(f"WARNING: No prediction data to plot. Predictions path was: {predictions_path}")
     
     print("--- Performance Visualization Script Finished ---")
 

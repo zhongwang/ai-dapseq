@@ -155,14 +155,11 @@ def extract_tf_binding_signals(promoter_file_path, bigwig_dir_path, output_dir_p
     if zscore_normalize_flag:
         print("Applying Z-score normalization across promoters for each TF...")
         num_tfs = len(bigwig_files)
-        # This is a simplification. For true Z-scoring across all bases of all promoters for each TF:
-        # 1. Concatenate all signals for a given TF across all promoters.
-        # 2. Compute mean and std for that TF.
-        # 3. Apply Z-score to each promoter's signal for that TF.
-        # This requires having all data in memory or multiple passes.
-
-        # For simplicity in this script, we'll demonstrate Z-scoring per TF on a per-promoter basis
-        # or more correctly, we should aggregate stats across all promoters for each TF.
+        # For Z-scoring across all bases of all promoters for each TF:
+        # 1. All signals for a given TF (across all promoters and all positions) are collected.
+        # 2. The global mean and std deviation are computed for that TF's collected signals.
+        # 3. Z-score transformation is then applied to each promoter's signal for that TF using these global statistics.
+        # This requires collecting all signals for each TF, which can be memory intensive but provides accurate global normalization.
         # Let's collect all data for each TF first.
         tf_all_signals_list = [[] for _ in range(num_tfs)] # List of lists, one per TF
 

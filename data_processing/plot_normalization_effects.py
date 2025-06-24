@@ -8,7 +8,7 @@ import re
 def parse_arguments():
     """Parses command-line arguments."""
     parser = argparse.ArgumentParser(description="Plot the effects of normalization on TF binding signals.")
-    parser.add_argument("--npy_dir", required=True, help="Directory containing RAW .npy signal files (genes x (TFs x promoter_length) matrices).")
+    parser.add_argument("--npy_dir", required=True, help="Directory containing .npy signal files, where each file corresponds to a gene and contains a (TFs x promoter_length) matrix.")
     parser.add_argument("--bigwig_dir", required=True, help="Directory containing original TF bigWig files (to determine TF order and names).")
     parser.add_argument("--output_plot_dir", required=True, help="Directory to save the output plots.")
     parser.add_argument("--tfs_to_plot", required=True, help="Comma-separated list of TF names (e.g., 'TF1,TF_ABC') or 0-based indices (e.g., '0,5,10') to plot.")
