@@ -21,9 +21,9 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "../output/final_co_expressed.txt"
-FEATURE_VECTOR_DIR = "../output_train/"
-MODEL_SAVE_PATH = "/output/best_siamese_model.pth" # Added
+GENE_PAIRS_TSV_PATH = "./output/final_co_expressed.txt"
+FEATURE_VECTOR_DIR = "./output/feature_vectors/"
+MODEL_SAVE_PATH = "./output/best_siamese_model.pth" # Added
 
 # --- Model Hyperparameters (Example values, tune as needed) ---
 INPUT_FEATURE_DIM = 14      # Example: 4 (DNA one-hot) + 80 (TF affinities)
