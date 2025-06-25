@@ -21,9 +21,9 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "./output/final_co_expressed.txt"
-FEATURE_VECTOR_DIR = "./output/feature_vectors/"
-MODEL_SAVE_PATH = "./output/best_siamese_model.pth" # Added
+GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/final_coexpressed.txt"
+FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/feature_vectors/"
+MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/best_siamese_model.pth" # Added
 
 # --- Model Hyperparameters (Example values, tune as needed) ---
 INPUT_FEATURE_DIM = 14      # Example: 4 (DNA one-hot) + 80 (TF affinities)
@@ -258,7 +258,7 @@ if __name__ == '__main__':
     print("\n[Phase 1: Data Loading and Preparation]")
     dummy_tsv_path = "dummy_gene_pairs.tsv"
     dummy_feature_dir = "dummy_feature_vectors/"
-    actual_data_mode = False
+    actual_data_mode = True
 
     if os.path.exists(GENE_PAIRS_TSV_PATH) and os.path.isdir(FEATURE_VECTOR_DIR):
         print(f"Attempting to use actual data paths: {GENE_PAIRS_TSV_PATH}, {FEATURE_VECTOR_DIR}")
@@ -320,7 +320,18 @@ if __name__ == '__main__':
         current_feature_dir = dummy_feature_dir
 
     # Perform gene-disjoint split
-    train_df, val_df, test_df = split_data_gene_disjoint(all_pairs_df, train_frac=0.7, val_frac=0.15)
+    train_df, val_df, test_df = split_data_gene_disjoint(all_pairs_df, train_frac=0.6, val_frac=0.2)
+
+    # Save the test data to a file for later evaluation
+    test_data_save_path = './data/test_gene_pairs.csv'
+    if not test_df.empty:
+        try:
+            # Ensure the data directory exists
+            os.makedirs('./data', exist_ok=True)
+            test_df.to_csv(test_data_save_path, index=False)
+            print(f"Test data saved to {test_data_save_path}")
+        except Exception as e:
+            print(f"Error saving test data: {e}")
 
     if train_df.empty:
         print("CRITICAL: Training DataFrame is empty after split. Cannot proceed with training.")
