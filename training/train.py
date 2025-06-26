@@ -64,7 +64,7 @@ class GenePairDataset(Dataset):
 
         Gene1 = self.gene_pairs.iloc[idx]['Gene1']
         Gene2 = self.gene_pairs.iloc[idx]['Gene2']
-        correlation = float(self.gene_pairs.iloc[idx]['co_expression_correlation'])
+        correlation = float(self.gene_pairs.iloc[idx]['Correlation'])
 
         try:
             promoter_seq1_path = os.path.join(self.feature_dir, f"{Gene1}.npy")
@@ -267,7 +267,7 @@ if __name__ == '__main__':
                 print(f"Warning: {FEATURE_VECTOR_DIR} is empty or contains no .npy files.")
                 raise FileNotFoundError("Feature directory empty")
             all_pairs_df = pd.read_csv(GENE_PAIRS_TSV_PATH, sep='\t')
-            required_cols = ['Gene1', 'Gene2', 'co_expression_correlation']
+            required_cols = ['Gene1', 'Gene2', 'Correlation']
             if not all(col in all_pairs_df.columns for col in required_cols):
                 print(f"Actual TSV file {GENE_PAIRS_TSV_PATH} is missing required columns.")
                 raise ValueError("Missing columns")
@@ -292,18 +292,18 @@ if __name__ == '__main__':
             if g1 == g2: continue
             pair_hash = tuple(sorted((g1, g2)))
             if pair_hash not in seen_pair_hashes:
-                valid_pairs.append({'Gene1': g1, 'Gene2': g2, 'co_expression_correlation': np.random.rand()})
+                valid_pairs.append({'Gene1': g1, 'Gene2': g2, 'Correlation': np.random.rand()})
                 seen_pair_hashes.add(pair_hash)
         all_pairs_df = pd.DataFrame(valid_pairs)
         if all_pairs_df.empty: # Fallback
              all_pairs_df = pd.DataFrame({
                 'Gene1': [f'g{i}' for i in range(10)], 'Gene2': [f'g{i+10}' for i in range(10)],
-                'co_expression_correlation': np.random.rand(10)
+                'Correlation': np.random.rand(10)
             })
              # Add some pairs with shared genes for splitting test
              all_pairs_df = pd.concat([all_pairs_df, pd.DataFrame({
                  'Gene1': ['g0', 'g1', 'g2'], 'Gene2': ['g1', 'g2', 'g0'], 
-                 'co_expression_correlation': [0.5,0.6,0.7]})], ignore_index=True)
+                 'Correlation': [0.5,0.6,0.7]})], ignore_index=True)
 
 
         all_pairs_df.to_csv(dummy_tsv_path, sep='\t', index=False)

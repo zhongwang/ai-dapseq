@@ -6,7 +6,7 @@ import os
 def parse_arguments():
     """Parses command-line arguments."""
     parser = argparse.ArgumentParser(description="Prepare co-expression correlation coefficient dataset.")
-    parser.add_argument("--coexpression_file", required=True, help="Path to the input TSV file with gene pairs and correlations (e.g., Gene1, Gene2, correlation_coefficient).")
+    parser.add_argument("--coexpression_file", required=True, help="Path to the input TSV file with gene pairs and correlations (e.g., Gene1, Gene2, Correlation).")
     parser.add_argument("--processed_signals_dir", help="Path to the directory containing .npy files from Step 3.2/3.3 (used for validation if --validate_genes is set).")
     parser.add_argument("--output_file", required=True, help="Path to the output final co-expression TSV file.")
     parser.add_argument("--validate_genes", action='store_true', help="If set, validate that gene IDs in the coexpression file have corresponding processed signal files in --processed_signals_dir.")
@@ -26,9 +26,9 @@ def prepare_coexpression_data(coexpression_file_path, output_file_path, processe
         coexp_df = pd.read_csv(coexpression_file_path, sep='\t')
         print(f"Successfully loaded co-expression data from {coexpression_file_path}. Found {len(coexp_df)} pairs.")
 
-        # Expecting columns like 'Gene1', 'Gene2', 'correlation_coefficient'
+        # Expecting columns like 'Gene1', 'Gene2', 'Correlation'
         # Adjust column names if they are different in the actual input file.
-        expected_cols = ['Gene1', 'Gene2', 'correlation_coefficient'] # Example names
+        expected_cols = ['Gene1', 'Gene2', 'Correlation'] # Example names
         if not all(col in coexp_df.columns for col in expected_cols):
             print(f"Warning: Expected columns {expected_cols} not all found in {coexpression_file_path}. Current columns: {coexp_df.columns.tolist()}")
             # Proceeding, but user should verify column names.

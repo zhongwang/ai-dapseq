@@ -58,7 +58,7 @@ class GenePairDataset(Dataset):
 
         Gene1 = self.gene_pairs.iloc[idx]['Gene1']
         Gene2 = self.gene_pairs.iloc[idx]['Gene2']
-        correlation = float(self.gene_pairs.iloc[idx]['co_expression_correlation'])
+        correlation = float(self.gene_pairs.iloc[idx]['Correlation'])
 
         try:
             promoter_seq1_path = os.path.join(self.feature_dir, f"{Gene1}.npy")
