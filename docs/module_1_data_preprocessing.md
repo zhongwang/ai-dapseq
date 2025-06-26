@@ -44,11 +44,11 @@ The primary objective of this module is to process the raw genomic, transcriptom
 
 ### Step 3.4: Co-expression Correlation Coefficient Dataset Preparation
 
--   **Input:** A TSV file containing gene pairs and their experimentally determined co-expression correlation coefficients (e.g., `gene_pairs_correlations.tsv` with columns `gene1_id`, `gene2_id`, `correlation_coefficient`).
+-   **Input:** A TSV file containing gene pairs and their experimentally determined co-expression correlation coefficients (e.g., `gene_pairs_correlations.tsv` with columns `Gene1`, `Gene2`, `Correlation`).
 -   **Process:**
     1.  **Load Data:** Load the TSV file using `pandas` into a DataFrame.
-    2.  **Validation (Optional but Recommended):** Ensure that `gene1_id` and `gene2_id` in this file correspond to gene IDs for which promoter sequences and TF binding data have been processed in the previous steps. Filter pairs if necessary.
--   **Output:** A final TSV file (e.g., `final_coexpression_data.tsv`) with columns: `gene1_id`, `gene2_id`, `co_expression_correlation`. This file is ready for use in model training and evaluation.
+    2.  **Validation (Optional but Recommended):** Ensure that `Gene1` and `Gene2` in this file correspond to gene IDs for which promoter sequences and TF binding data have been processed in the previous steps. Filter pairs if necessary.
+-   **Output:** A final TSV file (e.g., `final_coexpression_data.tsv`) with columns: `Gene1`, `Gene2`, `Correlation`. This file is ready for use in model training and evaluation.
 
 ## 4. Recommended Libraries
 
@@ -64,6 +64,6 @@ This module is complete when the following curated data files are generated, wel
 
 1.  **Promoter DNA Sequences:** A file (e.g., FASTA or TSV) containing the DNA sequence for each promoter region, linked to `gene_id`. (Output of Step 3.1)
 2.  **Normalized Per-Base TF Binding Signals:** A directory of `.npy` files, where each file (named by `gene_id`) contains a matrix of normalized TF binding affinity values (Number of TFs x Promoter Length) for the corresponding promoter. (Output of Step 3.3)
-3.  **Gene Pair Co-expression Data:** A TSV file listing gene pairs (`gene1_id`, `gene2_id`) and their associated co-expression correlation coefficients. (Output of Step 3.4)
+3.  **Gene Pair Co-expression Data:** A TSV file listing gene pairs (`Gene1`, `Gene2`) and their associated co-expression correlation coefficients. (Output of Step 3.4)
 
 The successful generation and validation of these three components signify the completion of Module 1.
