@@ -15,15 +15,19 @@ def load_training_logs(log_file_path):
     """
     # Example: return pd.read_csv(log_file_path)
     print(f"INFO: Attempting to load training logs from: {log_file_path}")
-    # Replace with actual loading logic
-    data = {
-        'epoch': range(1, 51),
-        'train_loss': np.random.rand(50) * 0.1 + 0.05,
-        'val_loss': np.random.rand(50) * 0.1 + 0.08,
-        'val_pearson_r': np.random.rand(50) * 0.3 + 0.5,
-        'val_mae': np.random.rand(50) * 0.1 + 0.1
-    }
-    return pd.DataFrame(data)
+
+    if log_file_path == "placeholder_logs":
+        # Replace with actual loading logic
+        data = {
+            'epoch': range(1, 51),
+            'train_loss': np.random.rand(50) * 0.1 + 0.05,
+            'val_loss': np.random.rand(50) * 0.1 + 0.08,
+            'val_pearson_r': np.random.rand(50) * 0.3 + 0.5,
+            'val_mae': np.random.rand(50) * 0.1 + 0.1
+        }
+        return pd.DataFrame(data)
+
+    return pd.read_csv(log_file_path)
 
 # Placeholder for loading model predictions (actual vs. predicted)
 def load_model_predictions(predictions_file_path):
@@ -33,14 +37,18 @@ def load_model_predictions(predictions_file_path):
     """
     # Example: return pd.read_csv(predictions_file_path)
     print(f"INFO: Attempting to load model predictions from: {predictions_file_path}")
-    # Replace with actual loading logic
-    data = {
-        'actual_correlation': np.random.rand(100) * 2 - 1,
-        'predicted_correlation': np.random.rand(100) * 2 - 1
-    }
-    # Ensure some correlation for a more realistic plot
-    data['predicted_correlation'] = data['actual_correlation'] * 0.7 + (np.random.rand(100) * 0.6 - 0.3)
-    return pd.DataFrame(data)
+
+    if predictions_file_path == "placeholder_predictions":
+        # Replace with actual loading logic
+        data = {
+            'actual_correlation': np.random.rand(100) * 2 - 1,
+            'predicted_correlation': np.random.rand(100) * 2 - 1
+        }
+        # Ensure some correlation for a more realistic plot
+        data['predicted_correlation'] = data['actual_correlation'] * 0.7 + (np.random.rand(100) * 0.6 - 0.3)
+        return pd.DataFrame(data)
+
+    return pd.read_csv(predictions_file_path)
 
 def plot_training_curves(logs_df, output_path="training_loss_curves.png"):
     """Plots training and validation loss curves."""
