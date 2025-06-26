@@ -7,7 +7,6 @@ import numpy as np
 import os
 import time # Added
 import copy # Added
-from sklearn.model_selection import train_test_split
 
 # Attempt to import the model from the parent directory's 'model' folder
 try:
@@ -21,9 +20,10 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/final_coexpressed.txt"
-FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/feature_vectors/"
-MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/best_siamese_model.pth" # Added
+GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/final_coexpressed_by_chrom.txt"
+FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/feature_vectors_by_chrom/"
+MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/best_siamese_model.pth"
+GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/promoter_sequences_by_chromosome.txt"
 
 # --- Model Hyperparameters (Example values, tune as needed) ---
 INPUT_FEATURE_DIM = 14      # Example: 4 (DNA one-hot) + 80 (TF affinities)
@@ -90,60 +90,6 @@ class GenePairDataset(Dataset):
 
         return promoter_seq1, mask1, promoter_seq2, mask2, correlation
 
-def split_data_gene_disjoint(all_gene_pairs_df, train_frac=0.7, val_frac=0.15, random_state=42):
-    genes1 = all_gene_pairs_df['Gene1'].unique()
-    genes2 = all_gene_pairs_df['Gene2'].unique()
-    all_unique_genes = np.unique(np.concatenate((genes1, genes2)))
-
-    if len(all_unique_genes) < 3: # Need at least 3 genes to make 3 splits
-        print("Warning: Too few unique genes to perform a meaningful train/val/test split.")
-        # Return empty DFs for val/test if not enough genes
-        if len(all_unique_genes) == 0:
-            return pd.DataFrame(columns=all_gene_pairs_df.columns), pd.DataFrame(columns=all_gene_pairs_df.columns), pd.DataFrame(columns=all_gene_pairs_df.columns)
-        elif len(all_unique_genes) == 1:
-             train_genes_set = set(all_unique_genes)
-             val_genes_set = set()
-             test_genes_set = set()
-        elif len(all_unique_genes) == 2: # Put one in train, one in val, none in test as an example
-            train_genes_set = {all_unique_genes[0]}
-            val_genes_set = {all_unique_genes[1]}
-            test_genes_set = set()
-    else:
-        train_genes, temp_genes = train_test_split(
-            all_unique_genes, train_size=train_frac, random_state=random_state
-        )
-        if len(temp_genes) == 0: # No genes left for val/test
-            val_genes, test_genes = np.array([]), np.array([])
-        elif len(temp_genes) == 1: # Only one gene left, assign to val
-            val_genes, test_genes = temp_genes, np.array([])
-        else:
-            relative_val_frac = val_frac / (1.0 - train_frac) if (1.0 - train_frac) > 0 else 0
-            if relative_val_frac >= 1.0:
-                val_genes = temp_genes
-                test_genes = np.array([])
-            elif relative_val_frac <= 0.0 : # Should not happen if val_frac > 0
-                val_genes = np.array([])
-                test_genes = temp_genes
-            else:
-                 val_genes, test_genes = train_test_split(
-                    temp_genes, train_size=relative_val_frac, random_state=random_state
-                )
-        train_genes_set = set(train_genes)
-        val_genes_set = set(val_genes)
-        test_genes_set = set(test_genes)
-
-
-    print(f"Total unique genes: {len(all_unique_genes)}")
-    print(f"Train genes: {len(train_genes_set)}, Val genes: {len(val_genes_set)}, Test genes: {len(test_genes_set)}")
-
-    train_pairs_df = all_gene_pairs_df[all_gene_pairs_df['Gene1'].isin(train_genes_set) & all_gene_pairs_df['Gene2'].isin(train_genes_set)]
-    val_pairs_df = all_gene_pairs_df[all_gene_pairs_df['Gene1'].isin(val_genes_set) & all_gene_pairs_df['Gene2'].isin(val_genes_set)]
-    test_pairs_df = all_gene_pairs_df[all_gene_pairs_df['Gene1'].isin(test_genes_set) & all_gene_pairs_df['Gene2'].isin(test_genes_set)]
-    
-    print(f"Total pairs: {len(all_gene_pairs_df)}")
-    print(f"Train pairs: {len(train_pairs_df)}, Val pairs: {len(val_pairs_df)}, Test pairs: {len(test_pairs_df)}")
-    return train_pairs_df, val_pairs_df, test_pairs_df
-
 # --- Training Loop Definition (Step 3.2) ---
 def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device, patience, model_save_path):
     """
@@ -156,7 +102,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
 
     for epoch in range(num_epochs):
         start_time = time.time()
-        
+
         # --- Training Phase ---
         model.train()
         running_train_loss = 0.0
@@ -167,24 +113,24 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 corr_batch.to(device)
 
             optimizer.zero_grad()
-            
+
             try:
                 # Forward pass
                 predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch)
-                
+
                 # Calculate loss
                 loss = criterion(predicted_correlations.squeeze(), corr_batch.float())
-                
+
                 # Backward pass and optimize
                 loss.backward()
                 optimizer.step()
-                
+
                 running_train_loss += loss.item() * seq_a_batch.size(0) # loss.item() is avg loss for batch
             except Exception as e:
                 print(f"Error during training batch {i+1}/{len(train_loader)}: {e}")
                 print(f"Shapes: seq_a: {seq_a_batch.shape}, seq_b: {seq_b_batch.shape}, corr: {corr_batch.shape}")
                 # Potentially skip batch or raise error depending on desired robustness
-                continue 
+                continue
 
         epoch_train_loss = running_train_loss / len(train_loader.dataset) if len(train_loader.dataset) > 0 else 0
         history['train_loss'].append(epoch_train_loss)
@@ -199,7 +145,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                         seq_a_batch.to(device), mask_a_batch.to(device), \
                         seq_b_batch.to(device), mask_b_batch.to(device), \
                         corr_batch.to(device)
-                    
+
                     try:
                         predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch)
                         loss = criterion(predicted_correlations.squeeze(), corr_batch.float())
@@ -207,10 +153,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                     except Exception as e:
                         print(f"Error during validation batch: {e}")
                         continue
-            
+
             epoch_val_loss = running_val_loss / len(val_loader.dataset)
             history['val_loss'].append(epoch_val_loss)
-            
+
             # Learning rate scheduler step
             if scheduler:
                 scheduler.step(epoch_val_loss)
@@ -243,7 +189,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         elif epoch == num_epochs -1: # If no validation, save last model
              best_model_state = copy.deepcopy(model.state_dict())
              torch.save(best_model_state, model_save_path)
-             print(f"Training complete. Saved final model to {model_save_path}")
+             print(f"Training complete. Saved final model to {MODEL_SAVE_PATH}")
 
 
     if best_model_state:
@@ -277,7 +223,7 @@ if __name__ == '__main__':
         except Exception as e:
             print(f"Error loading actual data ({e}). Falling back to dummy data.")
             actual_data_mode = False
-    
+
     if not actual_data_mode:
         print(f"Using dummy data. Generating in {os.getcwd()} if not present.")
         os.makedirs(dummy_feature_dir, exist_ok=True)
@@ -302,7 +248,7 @@ if __name__ == '__main__':
             })
              # Add some pairs with shared genes for splitting test
              all_pairs_df = pd.concat([all_pairs_df, pd.DataFrame({
-                 'Gene1': ['g0', 'g1', 'g2'], 'Gene2': ['g1', 'g2', 'g0'], 
+                 'Gene1': ['g0', 'g1', 'g2'], 'Gene2': ['g1', 'g2', 'g0'],
                  'Correlation': [0.5,0.6,0.7]})], ignore_index=True)
 
 
@@ -319,8 +265,65 @@ if __name__ == '__main__':
         print(f"Ensured dummy .npy files (shape: ({MAX_SEQ_LEN}, {INPUT_FEATURE_DIM})) exist in: {dummy_feature_dir}")
         current_feature_dir = dummy_feature_dir
 
-    # Perform gene-disjoint split
-    train_df, val_df, test_df = split_data_gene_disjoint(all_pairs_df, train_frac=0.6, val_frac=0.2)
+    # Load the gene-to-chromosome mapping file
+    print(f"Loading gene-to-chromosome mapping from: {GENE_CHROMOSOME_MAPPING_PATH}")
+    try:
+        gene_chromosome_map_df = pd.read_csv(GENE_CHROMOSOME_MAPPING_PATH, sep='\t')
+        if 'gene_id' not in gene_chromosome_map_df.columns or 'chromosome' not in gene_chromosome_map_df.columns:
+             raise ValueError("Mapping file must contain 'gene_id' and 'chromosome' columns.")
+        print(f"Successfully loaded chromosome mapping for {len(gene_chromosome_map_df)} genes.")
+    except FileNotFoundError:
+        print(f"Error: Gene-to-chromosome mapping file not found at {GENE_CHROMOSOME_MAPPING_PATH}.")
+        print("Cannot perform chromosome-based split without this file.")
+        exit() # Exit if mapping file is not found
+    except Exception as e:
+        print(f"Error loading gene-to-chromosome mapping file: {e}")
+        exit()
+
+
+    # Create a mapping dictionary from gene_id to chromosome
+    gene_to_chr = gene_chromosome_map_df.set_index('gene_id')['chromosome'].to_dict()
+
+    # Add chromosome information to the all_pairs_df
+    print("Adding chromosome information to gene pairs.")
+    all_pairs_df['Gene1_chromosome'] = all_pairs_df['Gene1'].map(gene_to_chr)
+    all_pairs_df['Gene2_chromosome'] = all_pairs_df['Gene2'].map(gene_to_chr)
+
+    # Handle cases where gene IDs in all_pairs_df are not in the mapping file
+    if all_pairs_df['Gene1_chromosome'].isnull().any() or all_pairs_df['Gene2_chromosome'].isnull().any():
+        print("Warning: Some gene IDs in gene pairs were not found in the chromosome mapping file.")
+        print("These pairs will be excluded from all datasets.")
+        all_pairs_df.dropna(subset=['Gene1_chromosome', 'Gene2_chromosome'], inplace=True)
+        print(f"Remaining pairs after removing those with missing chromosome info: {len(all_pairs_df)}")
+
+
+    # Perform chromosome-based split
+    print("\nPerforming chromosome-based data split.")
+
+    # Test set: pairs where both genes are on Chr2
+    test_df = all_pairs_df[
+        (all_pairs_df['Gene1_chromosome'] == 'Chr2') &
+        (all_pairs_df['Gene2_chromosome'] == 'Chr2')
+    ].copy()
+
+    # Validation set: pairs where both genes are on Chr4
+    val_df = all_pairs_df[
+        (all_pairs_df['Gene1_chromosome'] == 'Chr4') &
+        (all_pairs_df['Gene2_chromosome'] == 'Chr4')
+    ].copy()
+
+    # Train set: pairs where *neither* gene is on Chr2 or Chr4
+    train_df = all_pairs_df[
+        (~all_pairs_df['Gene1_chromosome'].isin(['Chr2', 'Chr4'])) &
+        (~all_pairs_df['Gene2_chromosome'].isin(['Chr2', 'Chr4']))
+    ].copy()
+
+
+    print(f"Total pairs loaded: {len(all_pairs_df)}")
+    print(f"Train pairs: {len(train_df)}")
+    print(f"Validation pairs (Chr4-Chr4): {len(val_df)}")
+    print(f"Test pairs (Chr2-Chr2): {len(test_df)}")
+
 
     # Save the test data to a file for later evaluation
     test_data_save_path = './data/test_gene_pairs.csv'
@@ -361,6 +364,7 @@ if __name__ == '__main__':
             else:
                 print("Test dataset created but is empty.")
 
+
         # 2. Model, Loss, Optimizer, Scheduler Setup
         print("\n[Phase 2: Model Initialization]")
         model = SiameseGeneTransformer(
@@ -381,7 +385,7 @@ if __name__ == '__main__':
 
         criterion = nn.MSELoss()
         optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
-        
+
         # Scheduler will only be used if val_loader is available
         scheduler = None
         if val_loader:
@@ -417,4 +421,3 @@ if __name__ == '__main__':
 
 
     print("\n--- End of Full Training Script Simulation ---")
-
