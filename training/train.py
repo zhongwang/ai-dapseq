@@ -7,6 +7,9 @@ import numpy as np
 import os
 import time # Added
 import copy # Added
+import csv # Added for logging
+from scipy.stats import pearsonr # Added for validation metric
+from sklearn.metrics import mean_absolute_error # Added for validation metric
 
 # Attempt to import the model from the parent directory's 'model' folder
 try:
@@ -91,14 +94,19 @@ class GenePairDataset(Dataset):
         return promoter_seq1, mask1, promoter_seq2, mask2, correlation
 
 # --- Training Loop Definition (Step 3.2) ---
-def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device, patience, model_save_path):
+def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device, patience, model_save_path, log_file_path):
     """
-    Trains the model and implements early stopping.
+    Trains the model, implements early stopping, and logs metrics to a CSV file.
     """
     best_model_state = None
     best_val_loss = float('inf')
     epochs_no_improve = 0
-    history = {'train_loss': [], 'val_loss': []}
+    history = {'train_loss': [], 'val_loss': [], 'val_pearson_r': [], 'val_mae': []}
+
+    # Initialize CSV log file
+    with open(log_file_path, 'w', newline='') as logfile:
+        logwriter = csv.writer(logfile)
+        logwriter.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
 
     for epoch in range(num_epochs):
         start_time = time.time()
@@ -138,6 +146,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         # --- Validation Phase ---
         model.eval()
         running_val_loss = 0.0
+        all_val_preds = []
+        all_val_targets = []
+
         if val_loader and len(val_loader.dataset) > 0: # Ensure val_loader is provided and not empty
             with torch.no_grad():
                 for seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch in val_loader:
@@ -147,9 +158,13 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                         corr_batch.to(device)
 
                     try:
-                        predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch)
-                        loss = criterion(predicted_correlations.squeeze(), corr_batch.float())
+                        predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch).squeeze()
+                        loss = criterion(predicted_correlations, corr_batch.float())
                         running_val_loss += loss.item() * seq_a_batch.size(0)
+
+                        all_val_preds.extend(predicted_correlations.cpu().numpy())
+                        all_val_targets.extend(corr_batch.cpu().numpy())
+
                     except Exception as e:
                         print(f"Error during validation batch: {e}")
                         continue
@@ -157,20 +172,40 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
             epoch_val_loss = running_val_loss / len(val_loader.dataset)
             history['val_loss'].append(epoch_val_loss)
 
+            # Calculate validation metrics
+            val_pearson_r, _ = pearsonr(all_val_targets, all_val_preds)
+            val_mae = mean_absolute_error(all_val_targets, all_val_preds)
+            history['val_pearson_r'].append(val_pearson_r)
+            history['val_mae'].append(val_mae)
+
+            # Log metrics to CSV
+            with open(log_file_path, 'a', newline='') as logfile:
+                logwriter = csv.writer(logfile)
+                logwriter.writerow([epoch + 1, epoch_train_loss, epoch_val_loss, val_pearson_r, val_mae])
+
             # Learning rate scheduler step
             if scheduler:
                 scheduler.step(epoch_val_loss)
+
+            print(f"Epoch {epoch+1}/{num_epochs} - "
+                  f"Train Loss: {epoch_train_loss:.4f}, Val Loss: {epoch_val_loss:.4f}, "
+                  f"Val Pearson R: {val_pearson_r:.4f}, Val MAE: {val_mae:.4f} - "
+                  f"Duration: {time.time() - start_time:.2f}s")
+
         else: # No validation loader or it's empty
             epoch_val_loss = float('inf') # Or some other indicator
-            history['val_loss'].append(None) # Or skip if not meaningful
+            history['val_loss'].append(None)
+            history['val_pearson_r'].append(None)
+            history['val_mae'].append(None)
+            # Log only train loss if no validation
+            with open(log_file_path, 'a', newline='') as logfile:
+                logwriter = csv.writer(logfile)
+                logwriter.writerow([epoch + 1, epoch_train_loss, None, None, None])
+
             print("Validation loader not available or empty, skipping validation phase.")
 
 
         epoch_duration = time.time() - start_time
-        print(f"Epoch {epoch+1}/{num_epochs} - "
-              f"Train Loss: {epoch_train_loss:.4f}, Val Loss: {epoch_val_loss:.4f} - "
-              f"Duration: {epoch_duration:.2f}s")
-
         # Early stopping
         if val_loader and len(val_loader.dataset) > 0: # Only if validation was performed
             if epoch_val_loss < best_val_loss:
@@ -397,6 +432,13 @@ if __name__ == '__main__':
 
         # 3. Train the Model
         print("\n[Phase 3: Model Training]")
+
+        # Define log file path and ensure directory exists
+        log_dir = "./training_logs"
+        os.makedirs(log_dir, exist_ok=True)
+        log_file_path = os.path.join(log_dir, "training_metrics.csv")
+        print(f"Training metrics will be logged to: {log_file_path}")
+
         try:
             # Check if train_loader has data before starting training
             if len(train_loader.dataset) == 0:
@@ -405,7 +447,7 @@ if __name__ == '__main__':
                 print(f"Starting training for {NUM_EPOCHS} epochs with early stopping patience {EARLY_STOPPING_PATIENCE}...")
                 trained_model, history = train_model(
                     model, train_loader, val_loader, criterion, optimizer, scheduler,
-                    NUM_EPOCHS, DEVICE, EARLY_STOPPING_PATIENCE, MODEL_SAVE_PATH
+                    NUM_EPOCHS, DEVICE, EARLY_STOPPING_PATIENCE, MODEL_SAVE_PATH, log_file_path
                 )
                 print("Training finished.")
                 print(f"Best model saved to: {MODEL_SAVE_PATH}")

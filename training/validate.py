@@ -18,11 +18,13 @@ except ImportError:
     from model.siamese_transformer import SiameseGeneTransformer
 
 # --- Configuration ---
-model_path = './output/best_siamese_model.pth'
+model_path = './output/across_chromosome_test/best_siamese_model.pth'
 test_data_path = './data/test_gene_pairs.csv'
+output_dir = "./output"
+output_csv_path = os.path.join(output_dir, 'test_predictions.csv')
 # Assuming feature vectors are in a directory relative to the workspace root or data dir
 # Adjust FEATURE_VECTOR_DIR as necessary based on your project structure
-FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/feature_vectors/"
+FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/feature_vectors_by_chrom/"
 
 # --- Model Hyperparameters (Must match training script) ---
 # Example values, ensure these match the model you are loading
@@ -156,6 +158,18 @@ with torch.no_grad():
 y_pred = np.concatenate(predictions)
 y_test = np.concatenate(true_values)
 print("Finished making predictions.")
+
+# Save actual and predicted correlations to CSV
+predictions_df = pd.DataFrame({
+    'actual_correlation': y_test,
+    'predicted_correlation': y_pred
+})
+
+# Ensure output directory exists
+os.makedirs(output_dir, exist_ok=True)
+
+predictions_df.to_csv(output_csv_path, index=False)
+print(f"Saved actual and predicted correlations to {output_csv_path}")
 
 # --- Calculate Metrics ---
 
