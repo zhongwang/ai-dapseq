@@ -5,6 +5,7 @@ import pyBigWig
 import os
 import glob
 from multiprocessing import Pool, cpu_count
+import time
 
 def parse_arguments():
     """Parses command-line arguments."""
@@ -12,7 +13,8 @@ def parse_arguments():
     parser.add_argument("--promoter_file", required=True, help="Path to the TSV file from Step 1 (gene_id, chromosome, promoter_start, promoter_end, strand).")
     parser.add_argument("--bigwig_dir", required=True, help="Directory containing TF binding bigWig files.")
     parser.add_argument("--output_dir", required=True, help="Directory to save the output .npy files (raw or normalized signals).")
-    parser.add_argument("--num_cores", type=int, default=max(1, cpu_count() - 1), help="Number of CPU cores to use for parallel processing.")
+    parser.add_argument("--num_cores", type=int, default=int(os.environ.get('SLURM_CPUS_PER_TASK', os.cpu_count())), help="Number of CPU cores to use for parallel processing.")
+    #parser.add_argument("--num_cores", type=int, default=max(1, cpu_count() - 1), help="Number of CPU cores to use for parallel processing.")
 
     # Normalization options (from Step 3.3)
     parser.add_argument("--log_transform", action='store_true', help="Apply log2(x+1) transformation to signals.")
@@ -26,12 +28,17 @@ def process_gene(args_tuple):
     Worker function to process a single gene: extract signals and optionally normalize.
     This function is designed to be used with multiprocessing.Pool.
     """
+    start_time = time.time() # Record start time for this gene
+
     gene_id, chrom, start, end, strand, bigwig_files, output_dir, log_transform, pseudocount = args_tuple
 
     promoter_length = end - start
     if promoter_length <= 0:
         print(f"Skipping gene {gene_id}: promoter length is non-positive ({promoter_length}).")
-        return gene_id, None, "Invalid promoter length"
+        # Return duration even if skipping
+        end_time = time.time()
+        duration = end_time - start_time
+        return gene_id, None, "Invalid promoter length", duration
 
     # Matrix to store signals for this gene: (Number of TFs x Promoter Length)
     # Initialize with zeros, assuming if a TF has no signal or file is problematic, signal is 0.
@@ -80,12 +87,17 @@ def process_gene(args_tuple):
     output_file_path = os.path.join(output_dir, f"{gene_id}.npy")
     # np.save(output_file_path, gene_signals_matrix) # Saving will be done after potential Z-scoring
 
-    return gene_id, gene_signals_matrix, None # Return None for error status if successful
+    # Return the result along with the processing duration
+    end_time = time.time()
+    duration = end_time - start_time
+    return gene_id, gene_signals_matrix, None, duration
 
 def extract_tf_binding_signals(promoter_file_path, bigwig_dir_path, output_dir_path, num_cores, log_transform_flag, zscore_normalize_flag, pseudocount_val):
     """
     Main function to orchestrate TF binding signal extraction and normalization.
     """
+    total_start_time = time.time() # Record start time for overall process
+
     try:
         promoter_df = pd.read_csv(promoter_file_path, sep='\t')
         required_cols = ['gene_id', 'chromosome', 'promoter_start', 'promoter_end', 'strand']
@@ -127,22 +139,59 @@ def extract_tf_binding_signals(promoter_file_path, bigwig_dir_path, output_dir_p
     print(f"Starting signal extraction for {len(tasks)} genes using {num_cores} cores...")
 
     all_gene_signals = {} # gene_id -> signal_matrix (raw or log-transformed)
-    with Pool(processes=num_cores) as pool:
-        results = pool.map(process_gene, tasks)
-
     successful_extractions = 0
     failed_extractions = 0
-    for gene_id, signal_matrix, error_msg in results:
-        if error_msg:
-            print(f"Extraction failed for {gene_id}: {error_msg}")
-            failed_extractions += 1
-        elif signal_matrix is not None:
-            all_gene_signals[gene_id] = signal_matrix
-            successful_extractions += 1
-        else:
-            # This case implies an issue not caught by error_msg but matrix is None
-            print(f"Extraction yielded no data for {gene_id}, but no specific error message.")
-            failed_extractions += 1
+    processed_count = 0
+    total_duration_processed = 0
+    num_tasks = len(tasks)
+
+    with Pool(processes=num_cores) as pool:
+        # Use imap_unordered for results as they complete
+        results_iterator = pool.imap_unordered(process_gene, tasks)
+
+        for result in results_iterator:
+            # Ensure the result tuple has 4 elements (gene_id, signal_matrix, error_msg, duration)
+            if len(result) == 4:
+                 gene_id, signal_matrix, error_msg, duration = result
+            else:
+                 # Handle unexpected result format (e.g., from old code or error)
+                 print(f"Warning: Received unexpected result format for a gene. Skipping timing for this result: {result}")
+                 if len(result) == 3: # Assume old format (gene_id, signal_matrix, error_msg)
+                      gene_id, signal_matrix, error_msg = result
+                      duration = 0 # Assign 0 duration or handle as appropriate
+                 else:
+                      print(f"Error: Unexpected result format: {result}. Skipping this result.")
+                      failed_extractions += 1
+                      continue # Skip to the next result
+
+            processed_count += 1
+            total_duration_processed += duration
+
+            if error_msg:
+                print(f"Extraction failed for {gene_id}: {error_msg}")
+                failed_extractions += 1
+            elif signal_matrix is not None:
+                all_gene_signals[gene_id] = signal_matrix
+                successful_extractions += 1
+                print(f"Processed gene {gene_id} in {duration:.4f} seconds. Completed {processed_count}/{num_tasks}.")
+            else:
+                # This case implies an issue not caught by error_msg but matrix is None
+                print(f"Extraction yielded no data for {gene_id}, but no specific error message.")
+                failed_extractions += 1
+
+            # Provide estimated finish time periodically
+            if processed_count > 0 and (processed_count % 100 == 0 or processed_count == num_tasks):
+                elapsed_time = time.time() - total_start_time
+                # Avoid division by zero if no duration recorded yet or processed_count is 0
+                if processed_count > 0:
+                    avg_time_per_gene = total_duration_processed / processed_count
+                    remaining_genes = num_tasks - processed_count
+                    estimated_remaining_time = avg_time_per_gene * remaining_genes
+                    estimated_finish_time = time.time() + estimated_remaining_time
+                    print(f"Elapsed time: {elapsed_time:.2f}s. Processed {processed_count}/{num_tasks}. Estimated remaining time: {estimated_remaining_time:.2f}s. Estimated finish time: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(estimated_finish_time))}")
+                else:
+                     print(f"Elapsed time: {elapsed_time:.2f}s. Processed {processed_count}/{num_tasks}. Cannot estimate finish time yet.")
+
 
     print(f"Signal extraction phase complete. Successfully processed: {successful_extractions}, Failed: {failed_extractions}")
 
@@ -223,7 +272,8 @@ if __name__ == "__main__":
             args.zscore_normalize,
             args.pseudocount
         )
-        print("Step 2 & 3: TF binding signal extraction and optional normalization finished.")
+    total_end_time = time.time()
+    print(f"Step 2 & 3: TF binding signal extraction and optional normalization finished. Total time: {total_end_time - total_start_time:.2f} seconds.")
 
 # Example usage (comment out or remove before running as a script):
 # python step2_extract_tf_binding_signals.py \
