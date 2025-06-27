@@ -193,55 +193,15 @@ def extract_tf_binding_signals(promoter_file_path, bigwig_dir_path, output_dir_p
                      print(f"Elapsed time: {elapsed_time:.2f}s. Processed {processed_count}/{num_tasks}. Cannot estimate finish time yet.")
 
 
+    # After pool is done and results are collected:
     print(f"Signal extraction phase complete. Successfully processed: {successful_extractions}, Failed: {failed_extractions}")
 
     if not all_gene_signals:
         print("No signals were extracted. Aborting further processing.")
         return
 
-    # Step 3.3: Signal Normalization (continued - Z-score)
-    if zscore_normalize_flag:
-        print("Applying Z-score normalization across promoters for each TF...")
-        num_tfs = len(bigwig_files)
-        # For Z-scoring across all bases of all promoters for each TF:
-        # 1. All signals for a given TF (across all promoters and all positions) are collected.
-        # 2. The global mean and std deviation are computed for that TF's collected signals.
-        # 3. Z-score transformation is then applied to each promoter's signal for that TF using these global statistics.
-        # This requires collecting all signals for each TF, which can be memory intensive but provides accurate global normalization.
-        # Let's collect all data for each TF first.
-        tf_all_signals_list = [[] for _ in range(num_tfs)] # List of lists, one per TF
-
-        for gene_id in promoter_df['gene_id']:
-            if gene_id in all_gene_signals:
-                signal_matrix = all_gene_signals[gene_id]
-                if signal_matrix.shape[0] == num_tfs: # Ensure matrix has expected num TFs
-                    for tf_idx in range(num_tfs):
-                        tf_all_signals_list[tf_idx].extend(signal_matrix[tf_idx, :].tolist())
-                else:
-                    print(f"Warning: Signal matrix for gene {gene_id} has {signal_matrix.shape[0]} TFs, expected {num_tfs}. Skipping for Z-score calculation of this gene.")
-
-        tf_means = np.zeros(num_tfs)
-        tf_stds = np.ones(num_tfs) # Use 1 for std if data is constant or count is too low
-
-        for tf_idx in range(num_tfs):
-            if tf_all_signals_list[tf_idx]:
-                flat_signals = np.array(tf_all_signals_list[tf_idx])
-                tf_means[tf_idx] = np.mean(flat_signals)
-                std_val = np.std(flat_signals)
-                tf_stds[tf_idx] = std_val if std_val > 1e-6 else 1.0 # Avoid division by zero or very small std
-            else:
-                print(f"Warning: No signals collected for TF index {tf_idx} for Z-score normalization.")
-
-        # Apply Z-score normalization to the stored matrices
-        for gene_id in all_gene_signals:
-            signal_matrix = all_gene_signals[gene_id]
-            if signal_matrix.shape[0] == num_tfs:
-                normalized_matrix = (signal_matrix - tf_means[:, np.newaxis]) / tf_stds[:, np.newaxis]
-                all_gene_signals[gene_id] = normalized_matrix
-            # else: already warned above
-        print("Z-score normalization applied.")
-
-    # Save the (potentially normalized) matrices
+    # Save the (raw or log-transformed) matrices to individual .npy files
+    # This happens regardless of whether z-score normalization is requested later
     print(f"Saving {len(all_gene_signals)} signal matrices to {output_dir_path}...")
     saved_count = 0
     for gene_id, signal_matrix in all_gene_signals.items():
@@ -251,8 +211,91 @@ def extract_tf_binding_signals(promoter_file_path, bigwig_dir_path, output_dir_p
             saved_count +=1
         except Exception as e:
             print(f"Error saving {output_file}: {e}")
-
     print(f"Successfully saved {saved_count} .npy files.")
+
+    # Clear the dictionary to free up memory
+    del all_gene_signals
+    import gc
+    gc.collect() # Suggest garbage collection
+
+    # Step 3.3: Signal Normalization (Z-score) - Memory Optimized Two-Pass Approach
+    if zscore_normalize_flag:
+        print("Applying Z-score normalization across promoters for each TF (memory optimized)...")
+        num_tfs = len(bigwig_files)
+        gene_files = glob.glob(os.path.join(output_dir_path, "*.npy"))
+        if not gene_files:
+            print("No gene .npy files found for normalization.")
+            # This case should ideally not happen if saving was successful, but good to check
+            print("Error: No .npy files found in the output directory after saving.")
+            return
+
+        # Pass 1: Calculate sum and sum of squares for each TF
+        print("Pass 1: Calculating sums and sum of squares...")
+        tf_sum = np.zeros(num_tfs)
+        tf_sum_sq = np.zeros(num_tfs)
+        tf_counts = np.zeros(num_tfs, dtype=int) # To handle potential missing data for a TF across all genes or issues loading files
+
+        for gene_file in gene_files:
+            try:
+                # Use mmap_mode='r' to read file without loading the entire content into memory
+                signal_matrix = np.load(gene_file, mmap_mode='r')
+                if signal_matrix.shape[0] == num_tfs:
+                     # Reshape to flatten all signals for a TF across positions in this gene
+                    flat_signals = signal_matrix.reshape(num_tfs, -1)
+                    # Perform calculation on mmap'd array - should be memory efficient
+                    tf_sum += np.sum(flat_signals, axis=1)
+                    tf_sum_sq += np.sum(flat_signals**2, axis=1)
+                    tf_counts += flat_signals.shape[1]
+                else:
+                    print(f"Warning: Skipping {os.path.basename(gene_file)} in normalization passes due to unexpected TF count ({signal_matrix.shape[0]} vs {num_tfs}).")
+            except Exception as e:
+                print(f"Error reading {gene_file} in Pass 1: {e}")
+
+
+        # Calculate global mean and std deviation for each TF
+        tf_means = np.zeros(num_tfs)
+        tf_stds = np.ones(num_tfs) # Default to std=1.0
+
+        for tf_idx in range(num_tfs):
+            count = tf_counts[tf_idx]
+            if count > 1: # Need at least two data points for a meaningful std deviation
+                tf_means[tf_idx] = tf_sum[tf_idx] / count
+                # Calculate variance: E[x^2] - (E[x])^2
+                mean_sq = tf_sum_sq[tf_idx] / count
+                variance = mean_sq - tf_means[tf_idx]**2
+                # Ensure non-negative variance due to potential floating point inaccuracies
+                variance = max(0, variance)
+                std_val = np.sqrt(variance)
+                tf_stds[tf_idx] = std_val if std_val > 1e-6 else 1.0
+            elif count == 1:
+                 tf_means[tf_idx] = tf_sum[tf_idx] # Mean is just the single value
+                 tf_stds[tf_idx] = 1.0 # Std deviation is undefined or zero, use 1.0 to avoid division by zero
+                 print(f"Warning: Only one data point for TF index {tf_idx}. Std set to 1.0.")
+            else: # count == 0
+                 print(f"Warning: No data counted for TF index {tf_idx}. Mean=0, Std=1.")
+
+
+        print("Pass 1 complete. Global means and std deviations calculated.")
+
+        # Pass 2: Apply Z-score normalization and save
+        print("Pass 2: Applying normalization and saving...")
+        normalized_count = 0
+        for gene_file in gene_files:
+            try:
+                # Load the data fully into memory for modification and saving
+                signal_matrix = np.load(gene_file)
+                if signal_matrix.shape[0] == num_tfs:
+                    # Apply Z-score normalization
+                    normalized_matrix = (signal_matrix - tf_means[:, np.newaxis]) / tf_stds[:, np.newaxis]
+
+                    # Overwrite the existing .npy file with normalized data
+                    np.save(gene_file, normalized_matrix)
+                    normalized_count += 1
+                # else: already warned in Pass 1
+            except Exception as e:
+                print(f"Error processing or saving normalized data for {gene_file} in Pass 2: {e}")
+
+        print(f"Normalization and saving complete. Successfully normalized {normalized_count} files.")
 
 
 if __name__ == "__main__":
@@ -273,7 +316,7 @@ if __name__ == "__main__":
             args.pseudocount
         )
     total_end_time = time.time()
-    print(f"Step 2 & 3: TF binding signal extraction and optional normalization finished. Total time: {total_end_time - total_start_time:.2f} seconds.")
+    print(f"Step 2 & 3: TF binding signal extraction and optional normalization finished.") #Total time: {total_end_time - total_start_time:.2f} seconds.")
 
 # Example usage (comment out or remove before running as a script):
 # python step2_extract_tf_binding_signals.py \
