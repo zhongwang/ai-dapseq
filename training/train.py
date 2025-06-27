@@ -23,20 +23,20 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/final_coexpressed_by_chrom.txt"
-FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/feature_vectors_by_chrom/"
-MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/best_siamese_model.pth"
-GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/promoter_sequences_by_chromosome.txt"
+GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/final_coexpressed.txt"
+FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/feature_vectors/"
+MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/best_siamese_model.pth"
+GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/promoter_sequences_cleaned.txt"
 
 # --- Model Hyperparameters (Example values, tune as needed) ---
-INPUT_FEATURE_DIM = 14      # Example: 4 (DNA one-hot) + 80 (TF affinities)
+INPUT_FEATURE_DIM = 248      # Example: 4 (DNA one-hot) + 80 (TF affinities)
 D_MODEL = 256               # Hidden size of the model (transformer embedding dim)
 NHEAD = 8                   # Number of attention heads
 NUM_ENCODER_LAYERS = 4      # Number of layers in the transformer towers
 DIM_FEEDFORWARD = 1024      # Dimension of the feed-forward network in transformer
 DROPOUT = 0.1               # Dropout rate in transformer
 AGGREGATION_METHOD = 'cls'  # 'cls' or 'mean'
-MAX_SEQ_LEN = 2500          # Max promoter sequence length for positional encoding
+MAX_SEQ_LEN = 2501          # Max promoter sequence length for positional encoding
 REGRESSION_HIDDEN_DIM = 128 # Hidden dimension in the regression head
 REGRESSION_DROPOUT = 0.15   # Dropout in the regression head
 

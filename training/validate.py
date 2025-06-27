@@ -18,24 +18,24 @@ except ImportError:
     from model.siamese_transformer import SiameseGeneTransformer
 
 # --- Configuration ---
-model_path = './output/across_chromosome_test/best_siamese_model.pth'
+model_path = './output/full_data/best_siamese_model.pth'
 test_data_path = './data/test_gene_pairs.csv'
-output_dir = "./output"
+output_dir = "./output/full_data/"
 output_csv_path = os.path.join(output_dir, 'test_predictions.csv')
 # Assuming feature vectors are in a directory relative to the workspace root or data dir
 # Adjust FEATURE_VECTOR_DIR as necessary based on your project structure
-FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/across_chromosome_test/feature_vectors_by_chrom/"
+FEATURE_VECTOR_DIR = "./output/full_data/feature_vectors/"
 
 # --- Model Hyperparameters (Must match training script) ---
 # Example values, ensure these match the model you are loading
-INPUT_FEATURE_DIM = 14
+INPUT_FEATURE_DIM = 248
 D_MODEL = 256
 NHEAD = 8
 NUM_ENCODER_LAYERS = 4
 DIM_FEEDFORWARD = 1024
 DROPOUT = 0.1
 AGGREGATION_METHOD = 'cls'
-MAX_SEQ_LEN = 2500
+MAX_SEQ_LEN = 2501
 REGRESSION_HIDDEN_DIM = 128
 REGRESSION_DROPOUT = 0.15
 BATCH_SIZE = 32 # Use a reasonable batch size for evaluation
