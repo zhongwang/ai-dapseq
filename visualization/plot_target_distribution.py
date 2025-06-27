@@ -5,7 +5,7 @@ import argparse
 import os
 
 def plot_target_distribution(df, target, output_dir, pseudocount, bins = 20):
-    fig, axs = plt.subplots(1, 2, figsize=(20, 10))
+    fig, axs = plt.subplots(1, 3, figsize=(15, 5), sharey = True, sharex = True)
     fig.suptitle(f"Transformation effects on target", fontsize=16)
 
     # No transformation
@@ -16,9 +16,16 @@ def plot_target_distribution(df, target, output_dir, pseudocount, bins = 20):
 
     # Log-transformation
     axs[1].hist(np.log2(df[target] + pseudocount), bins=bins, color='green', alpha=0.7, density=True)
-    axs[1].set_title(f"Log2(x + {pseudocount}) Transformation")
-    axs[1].set_xlabel("Log2(target + pseudocount)")
+    axs[1].set_title(f"Log2({target} + {pseudocount}) transformation")
+    axs[1].set_xlabel(f"Log2({target} + pseudocount)")
     axs[1].set_ylabel("Density")
+
+    # Fisher's Z-transformation
+    z_trans = 0.5 * np.log((1 + df[target]) / (1 - df[target]))
+    axs[2].hist(z_trans, bins=bins, color='orange', alpha=0.7, density=True)
+    axs[2].set_title(f"Fisher's Z-transformation")
+    axs[2].set_xlabel(f"Fisher's Z-transformation")
+    axs[2].set_ylabel("Density")
 
     for ax in axs:
         ax.grid(True, linestyle='--', alpha=0.6)
