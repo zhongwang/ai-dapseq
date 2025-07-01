@@ -38,14 +38,14 @@ DROPOUT = 0.1               # Dropout rate in transformer
 AGGREGATION_METHOD = 'cls'  # 'cls' or 'mean'
 MAX_SEQ_LEN = 2501          # Max promoter sequence length for positional encoding
 REGRESSION_HIDDEN_DIM = 128 # Hidden dimension in the regression head
-REGRESSION_DROPOUT = 0.15   # Dropout in the regression head
+REGRESSION_DROPOUT = 0.3   # Dropout in the regression head
 
 # --- Training Hyperparameters ---
-BATCH_SIZE = 2 # Can be small for large models / long sequences
+BATCH_SIZE = 32 # Can be small for large models / long sequences
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-2
-NUM_EPOCHS = 100 # Adjust as needed
-EARLY_STOPPING_PATIENCE = 10
+NUM_EPOCHS = 10 # Adjust as needed
+EARLY_STOPPING_PATIENCE = 5
 LR_SCHEDULER_PATIENCE = 5 # Patience for ReduceLROnPlateau
 
 # --- Device Configuration ---

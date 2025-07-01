@@ -117,7 +117,12 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
     val_set = coexp_df[(coexp_df['Gene1_chr'] == 'Chr4') & (coexp_df['Gene2_chr'] == 'Chr4')].copy()
     # The training set includes all pairs NOT in the test or validation sets
     # Use index.isin to correctly exclude rows present in test_set or val_set
-    train_set = coexp_df[~coexp_df.index.isin(test_set.index) & ~coexp_df.index.isin(val_set.index)].copy()
+    #train_set = coexp_df[~coexp_df.index.isin(test_set.index) & ~coexp_df.index.isin(val_set.index)].copy()
+
+    train_set = coexp_df[
+        (~coexp_df['Gene1_chr'].isin(['Chr2', 'Chr4'])) &
+        (~coexp_df['Gene2_chr'].isin(['Chr2', 'Chr4']))
+    ].copy()
 
 
     print(f"Split data: Train={len(train_set)} pairs, Validation={len(val_set)} pairs, Test={len(test_set)} pairs.")
