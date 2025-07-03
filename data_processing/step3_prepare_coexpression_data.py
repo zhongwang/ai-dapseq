@@ -283,13 +283,9 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
                     sampled_df = pd.concat([sampled_df, sampled_bin])
 
 
-        # Drop the original Correlation, and temporary chromosome columns
-        cols_to_drop = ['Correlation', 'Gene1_chr', 'Gene2_chr']
+        # Drop the Correlation bin, and temporary chromosome columns
+        cols_to_drop = ['Correlation_Bin', 'Gene1_chr', 'Gene2_chr']
         sampled_df = sampled_df.drop(columns=[col for col in cols_to_drop if col in sampled_df.columns], errors='ignore')
-
-        # Rename Correlation_Bin to Correlation
-        if 'Correlation_Bin' in sampled_df.columns:
-            sampled_df = sampled_df.rename(columns={'Correlation_Bin': 'Correlation'})
         return sampled_df
 
     print("Sampling from bins for train, validation, and test sets using respective min bin sizes...")
