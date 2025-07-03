@@ -51,17 +51,30 @@ if __name__ == "__main__":
         df_within_chrom = df_corr.dropna(subset=['Chr1', 'Chr2'])
         df_within_chrom = df_within_chrom[df_within_chrom['Chr1'] == df_within_chrom['Chr2']].copy()
 
-        # Count the occurrences of each chromosome for within-chromosome pairs
-        if not df_within_chrom.empty:
+        # Filter for correlation values greater than 0.48650343
+        # Ensure 'Correlation' column exists and is numeric
+        if 'Correlation' not in df_within_chrom.columns:
+             print("Warning: 'Correlation' column not found in the correlation file. Cannot filter by correlation value.")
+             df_filtered_corr = df_within_chrom # Proceed without correlation filter
+        else:
+            try:
+                df_within_chrom['Correlation'] = pd.to_numeric(df_within_chrom['Correlation'])
+                df_filtered_corr = df_within_chrom[df_within_chrom['Correlation'] > 0.48650343].copy()
+            except ValueError:
+                print("Warning: 'Correlation' column contains non-numeric values. Cannot filter by correlation value.")
+                df_filtered_corr = df_within_chrom # Proceed without correlation filter
+
+        # Count the occurrences of each chromosome for the filtered within-chromosome pairs
+        if not df_filtered_corr.empty:
             # We only need to count one of the columns, as Chr1 and Chr2 are the same
-            within_chrom_counts = df_within_chrom['Chr1'].value_counts().sort_index()
+            within_chrom_counts = df_filtered_corr['Chr1'].value_counts().sort_index()
 
             # Print the results
-            print("Within-Chromosome Pair Counts:")
+            print("Within-Chromosome Pair Counts (Correlation > 0.48650343):")
             for chrom, count in within_chrom_counts.items():
                 print(f"{chrom}: {count}")
         else:
-            print("No within-chromosome pairs found or mapped.")
+            print("No within-chromosome pairs found with correlation > 0.48650343.")
 
     except FileNotFoundError as e:
         print(f"Error: File not found - {e}")

@@ -159,8 +159,8 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
     try:
         min_corr = train_set['Correlation'].min()
         max_corr = train_set['Correlation'].max()
-        # Create 10 equally spaced bins between min and max correlation
-        # Use 11 edges for 10 bins
+        # Create 3 equally spaced bins between min and max correlation
+        # Use 4 edges for 10 bins
         bins = np.linspace(min_corr, max_corr, 4)
 
 
@@ -209,17 +209,41 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
 
             # Apply binning to the current dataframe for calculating its bin sizes
             # Note: This adds 'Correlation_Bin' to the df in place.
-            df['Correlation_Bin'] = pd.cut(df['Correlation'], bins=bins, labels=False, include_lowest=True, right=True)
+            # Use pd.cut to assign initial bins. Values outside the bin range will be NaN.
+            df['Correlation_Bin'], cutoff_bins = pd.cut(df['Correlation'], bins=bins, labels=False, include_lowest=True, retbins=True, right=True)
 
-            # Filter out NaN bin labels before counting
+            # Handle values outside the defined bins
+            nan_mask = df['Correlation_Bin'].isna()
+            if nan_mask.any():
+                print(f"Found {nan_mask.sum()} values outside bin range. Assigning to boundary bins.")
+                # Values less than the minimum bin edge get assigned to the first bin (bin 0)
+                min_edge = bins[0]
+                df.loc[nan_mask & (df['Correlation'] < min_edge), 'Correlation_Bin'] = 0
+
+                # Values greater than the maximum bin edge get assigned to the last bin
+                # The last bin index is num_bins - 1
+                max_edge = bins[-1]
+                num_bins = len(bins) - 1  # Number of actual bins
+                df.loc[nan_mask & (df['Correlation'] > max_edge), 'Correlation_Bin'] = num_bins - 1
+
+            # After handling NaNs, convert the column to integer type
+            # Use errors='coerce' to turn any remaining non-integer values into NaN, though ideally there shouldn't be any.
+            df['Correlation_Bin'] = df['Correlation_Bin'].astype(int, errors='ignore')
+
+            print(f"Bin cutoffs: {cutoff_bins}")
+
+            # Filter out NaN bin labels before counting (should be none after handling)
             bin_counts = df['Correlation_Bin'].value_counts().dropna()
 
             if bin_counts.empty:
                 return df, 0
 
-            return df, bin_counts.min()
+            # Ensure min_samples_per_bin is an integer
+            min_samples_per_bin = int(bin_counts.min())
+
+            return df, min_samples_per_bin
         except Exception as e:
-            print(f"Error calculating min bin size for a set: {e}")
+            print(f"Error calculating min bin size or assigning bins for a set: {e}")
             # Return original df and 0 min size in case of other errors during binning
             return df, 0
 
@@ -259,8 +283,13 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
                     sampled_df = pd.concat([sampled_df, sampled_bin])
 
 
-        # Drop the temporary bin and chromosome columns
-        sampled_df = sampled_df.drop(columns=['Correlation_Bin', 'Gene1_chr', 'Gene2_chr'], errors='ignore')
+        # Drop the original Correlation, and temporary chromosome columns
+        cols_to_drop = ['Correlation', 'Gene1_chr', 'Gene2_chr']
+        sampled_df = sampled_df.drop(columns=[col for col in cols_to_drop if col in sampled_df.columns], errors='ignore')
+
+        # Rename Correlation_Bin to Correlation
+        if 'Correlation_Bin' in sampled_df.columns:
+            sampled_df = sampled_df.rename(columns={'Correlation_Bin': 'Correlation'})
         return sampled_df
 
     print("Sampling from bins for train, validation, and test sets using respective min bin sizes...")
