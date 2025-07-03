@@ -383,7 +383,7 @@ if __name__ == '__main__':
         if not val_df.empty:
             val_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=val_df)
             if len(val_dataset) > 0:
-                 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0, collate_fn=None)
+                 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, collate_fn=None)
                  print(f"Validation DataLoader created. Batches: {len(val_loader)}, Samples: {len(val_dataset)}")
             else:
                 print("Validation dataset created but is empty.")
@@ -394,7 +394,7 @@ if __name__ == '__main__':
         if not test_df.empty:
             test_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=test_df)
             if len(test_dataset) > 0:
-                test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
+                test_loader = DataLoader(test_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0)
                 print(f"Test DataLoader created. Batches: {len(test_loader)}, Samples: {len(test_dataset)}")
             else:
                 print("Test dataset created but is empty.")
