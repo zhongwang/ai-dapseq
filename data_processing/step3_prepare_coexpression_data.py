@@ -155,17 +155,29 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
         return
 
 
-    # Bin training data by correlation using fixed bin widths
+    # Bin training data by correlation using quantiles
     try:
-        min_corr = train_set['Correlation'].min()
-        max_corr = train_set['Correlation'].max()
-        # Create 3 equally spaced bins between min and max correlation
-        # Use 4 edges for 10 bins
-        bins = np.linspace(min_corr, max_corr, 4)
+        # Define the number of bins. It was 3 based on the previous linspace call creating 4 edges.
+        num_bins = 1000
+        # Calculate quantiles for the training set correlation data.
+        # Use 0 and 1 (0% and 100%) to ensure the full range is covered for bin edges.
+        # Use .drop_duplicates() to handle cases where multiple quantiles might have the same value.
+        bins = train_set['Correlation'].quantile(np.linspace(0, 1, num_bins + 1)).drop_duplicates().sort_values().tolist()
+
+        # Ensure the first and last bin edges are the min and max of the training data respectively
+        # This is important for pd.cut with include_lowest=True and right=True to cover all data points.
+        if bins[0] > train_set['Correlation'].min():
+             bins.insert(0, train_set['Correlation'].min())
+        if bins[-1] < train_set['Correlation'].max():
+             bins.append(train_set['Correlation'].max())
+
+        # Convert the list of bin edges to a numpy array
+        bins = np.array(bins)
+        bins = np.array([-1, 0.3, 1])
 
 
     except Exception as e: # Catch potential errors during binning (e.g., train_set empty, though handled above, or issues with data types)
-        print(f"Could not create bins for training data using fixed widths: {e}. This can happen if there's an issue with correlation values or data structure.")
+        print(f"Could not create quantile bins for training data: {e}. This can happen if there's an issue with correlation values or data structure.")
         # Fallback to saving unsampled split data
         print("Saving unsampled data after splitting due to binning error.")
         cols_to_drop = ['Gene1_chr', 'Gene2_chr']
