@@ -161,7 +161,9 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
         max_corr = train_set['Correlation'].max()
         # Create 3 equally spaced bins between min and max correlation
         # Use 4 edges for 10 bins
-        bins = np.linspace(min_corr, max_corr, 4)
+        #bins = np.linspace(min_corr, max_corr, 4)
+
+        bins = np.array([-1, 0.3, 1])
 
 
     except Exception as e: # Catch potential errors during binning (e.g., train_set empty, though handled above, or issues with data types)

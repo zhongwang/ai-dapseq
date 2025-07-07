@@ -23,7 +23,7 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/final_coexpressed.txt"
+GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/final_coexpressed_0.3_classification.txt"
 FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/feature_vectors/"
 MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/best_siamese_model.pth"
 GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/promoter_sequences_cleaned.txt"
