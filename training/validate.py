@@ -18,13 +18,13 @@ except ImportError:
     from model.siamese_transformer import SiameseGeneTransformer
 
 # --- Configuration ---
-model_path = './output/full_data/best_siamese_model.pth'
+model_path = './output/new_full_data/best_siamese_model.pth'
 test_data_path = './data/test_gene_pairs.csv'
-output_dir = "./output/full_data/"
+output_dir = "./output/new_full_data/visualizations_10bins"
 output_csv_path = os.path.join(output_dir, 'test_predictions.csv')
 # Assuming feature vectors are in a directory relative to the workspace root or data dir
 # Adjust FEATURE_VECTOR_DIR as necessary based on your project structure
-FEATURE_VECTOR_DIR = "./output/full_data/feature_vectors/"
+FEATURE_VECTOR_DIR = "./output/new_full_data/feature_vectors/"
 
 # --- Model Hyperparameters (Must match training script) ---
 # Example values, ensure these match the model you are loading

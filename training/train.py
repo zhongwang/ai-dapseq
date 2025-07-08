@@ -10,6 +10,7 @@ import copy # Added
 import csv # Added for logging
 from scipy.stats import pearsonr # Added for validation metric
 from sklearn.metrics import mean_absolute_error # Added for validation metric
+import torch.cuda.amp as amp # Added for mixed precision training
 
 # Attempt to import the model from the parent directory's 'model' folder
 try:
@@ -23,10 +24,10 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/final_coexpressed.txt"
-FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/feature_vectors/"
-MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/best_siamese_model.pth"
-GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/full_data/promoter_sequences_cleaned.txt"
+GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/final_coexpressed_regression_10bins.txt"
+FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/feature_vectors/"
+MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/best_siamese_model.pth"
+GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/promoter_sequences.txt"
 
 # --- Model Hyperparameters (Example values, tune as needed) ---
 INPUT_FEATURE_DIM = 248      # Example: 4 (DNA one-hot) + 80 (TF affinities)
@@ -45,7 +46,7 @@ BATCH_SIZE = 32 # Can be small for large models / long sequences
 LEARNING_RATE = 1e-4
 WEIGHT_DECAY = 1e-2
 NUM_EPOCHS = 10 # Adjust as needed
-EARLY_STOPPING_PATIENCE = 5
+EARLY_STOPPING_PATIENCE = 3
 LR_SCHEDULER_PATIENCE = 5 # Patience for ReduceLROnPlateau
 
 # --- Device Configuration ---
@@ -108,6 +109,9 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         logwriter = csv.writer(logfile)
         logwriter.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
 
+    # Initialize GradScaler for mixed precision training
+    scaler = amp.GradScaler()
+
     for epoch in range(num_epochs):
         start_time = time.time()
 
@@ -129,9 +133,10 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 # Calculate loss
                 loss = criterion(predicted_correlations.squeeze(), corr_batch.float())
 
-                # Backward pass and optimize
-                loss.backward()
-                optimizer.step()
+                # Backward pass and optimize with scaler
+                scaler.scale(loss).backward()
+                scaler.step(optimizer)
+                scaler.update()
 
                 running_train_loss += loss.item() * seq_a_batch.size(0) # loss.item() is avg loss for batch
             except Exception as e:
@@ -151,23 +156,24 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
 
         if val_loader and len(val_loader.dataset) > 0: # Ensure val_loader is provided and not empty
             with torch.no_grad():
-                for seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch in val_loader:
-                    seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch = \
-                        seq_a_batch.to(device), mask_a_batch.to(device), \
-                        seq_b_batch.to(device), mask_b_batch.to(device), \
-                        corr_batch.to(device)
+                with amp.autocast(): # Autocast for mixed precision
+                    for seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch in val_loader:
+                        seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch = \
+                            seq_a_batch.to(device), mask_a_batch.to(device), \
+                            seq_b_batch.to(device), mask_b_batch.to(device), \
+                            corr_batch.to(device)
 
-                    try:
-                        predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch).squeeze()
-                        loss = criterion(predicted_correlations, corr_batch.float())
-                        running_val_loss += loss.item() * seq_a_batch.size(0)
+                        try:
+                            predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch).squeeze()
+                            loss = criterion(predicted_correlations, corr_batch.float())
+                            running_val_loss += loss.item() * seq_a_batch.size(0)
 
-                        all_val_preds.extend(predicted_correlations.cpu().numpy())
-                        all_val_targets.extend(corr_batch.cpu().numpy())
+                            all_val_preds.extend(predicted_correlations.cpu().numpy())
+                            all_val_targets.extend(corr_batch.cpu().numpy())
 
-                    except Exception as e:
-                        print(f"Error during validation batch: {e}")
-                        continue
+                        except Exception as e:
+                            print(f"Error during validation batch: {e}")
+                            continue
 
             epoch_val_loss = running_val_loss / len(val_loader.dataset)
             history['val_loss'].append(epoch_val_loss)
