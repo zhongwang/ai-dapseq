@@ -15,6 +15,7 @@ import torch.distributed as dist # Added for DDP
 from torch.utils.data.distributed import DistributedSampler # Added for DDP
 from torch.nn.parallel import DistributedDataParallel # Added for DDP
 import argparse # Added for DDP rank/world size
+from tqdm import tqdm # Added for progress bar
 
 # Attempt to import the model from the parent directory's 'model' folder
 try:
@@ -133,7 +134,7 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
         # Use tqdm for progress bar only on rank 0
         train_loader_iter = tqdm(train_loader, desc=f"Epoch {epoch+1} [Rank {rank}] Training", leave=False, disable=(rank != 0))
 
-        for i, (seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch) in enumerate(train_loader):
+        for i, (seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch) in enumerate(train_loader_iter):
             seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch = \
                 seq_a_batch.to(device), mask_a_batch.to(device), \
                 seq_b_batch.to(device), mask_b_batch.to(device), \
