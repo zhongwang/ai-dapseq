@@ -11,6 +11,10 @@ import csv # Added for logging
 from scipy.stats import pearsonr # Added for validation metric
 from sklearn.metrics import mean_absolute_error # Added for validation metric
 import torch.cuda.amp as amp # Added for mixed precision training
+import torch.distributed as dist # Added for DDP
+from torch.utils.data.distributed import DistributedSampler # Added for DDP
+from torch.nn.parallel import DistributedDataParallel # Added for DDP
+import argparse # Added for DDP rank/world size
 
 # Attempt to import the model from the parent directory's 'model' folder
 try:
@@ -95,29 +99,40 @@ class GenePairDataset(Dataset):
         return promoter_seq1, mask1, promoter_seq2, mask2, correlation
 
 # --- Training Loop Definition (Step 3.2) ---
-def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device, patience, model_save_path, log_file_path):
+def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler, num_epochs, device, patience, model_save_path, log_file_path, rank, world_size):
     """
     Trains the model, implements early stopping, and logs metrics to a CSV file.
+    Adjusted for DistributedDataParallel.
     """
     best_model_state = None
     best_val_loss = float('inf')
     epochs_no_improve = 0
     history = {'train_loss': [], 'val_loss': [], 'val_pearson_r': [], 'val_mae': []}
 
-    # Initialize CSV log file
-    with open(log_file_path, 'w', newline='') as logfile:
-        logwriter = csv.writer(logfile)
-        logwriter.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
+    # Initialize CSV log file - only on rank 0
+    if rank == 0:
+        with open(log_file_path, 'w', newline='') as logfile:
+            logwriter = csv.writer(logfile)
+            logwriter.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
 
     # Initialize GradScaler for mixed precision training
     scaler = amp.GradScaler()
 
     for epoch in range(num_epochs):
+        # Ensure samplers are set to the correct epoch in distributed training
+        if hasattr(train_loader.sampler, 'set_epoch'):
+            train_loader.sampler.set_epoch(epoch)
+        if val_loader and hasattr(val_loader.sampler, 'set_epoch'):
+             val_loader.sampler.set_epoch(epoch)
+
         start_time = time.time()
 
         # --- Training Phase ---
         model.train()
         running_train_loss = 0.0
+        # Use tqdm for progress bar only on rank 0
+        train_loader_iter = tqdm(train_loader, desc=f"Epoch {epoch+1} [Rank {rank}] Training", leave=False, disable=(rank != 0))
+
         for i, (seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch) in enumerate(train_loader):
             seq_a_batch, mask_a_batch, seq_b_batch, mask_b_batch, corr_batch = \
                 seq_a_batch.to(device), mask_a_batch.to(device), \
@@ -138,15 +153,34 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                 scaler.step(optimizer)
                 scaler.update()
 
-                running_train_loss += loss.item() * seq_a_batch.size(0) # loss.item() is avg loss for batch
+                # Aggregate loss from all processes
+                dist.all_reduce(loss, op=dist.ReduceOp.SUM)
+                # Divide by world size to get the average loss across all processes for this batch
+                loss = loss / world_size
+
+                running_train_loss += loss.item() * seq_a_batch.size(0) # loss.item() is avg loss for batch across processes
+
             except Exception as e:
-                print(f"Error during training batch {i+1}/{len(train_loader)}: {e}")
+                print(f"Error during training batch {i+1}/{len(train_loader)} on rank {rank}: {e}")
                 print(f"Shapes: seq_a: {seq_a_batch.shape}, seq_b: {seq_b_batch.shape}, corr: {corr_batch.shape}")
                 # Potentially skip batch or raise error depending on desired robustness
                 continue
 
-        epoch_train_loss = running_train_loss / len(train_loader.dataset) if len(train_loader.dataset) > 0 else 0
-        history['train_loss'].append(epoch_train_loss)
+        # Calculate average training loss for the epoch across all processes
+        # running_train_loss already has sum of losses scaled by batch size and divided by world_size
+        # So we just divide by the total number of samples processed by this rank
+        # To get the global average, we would need to sum running_train_loss across all ranks and divide by total dataset size
+        # Let's just calculate the average per rank for now, or better, aggregate the total loss.
+
+        # Sum running_train_loss across all processes
+        total_train_loss = torch.tensor(running_train_loss).to(device)
+        dist.all_reduce(total_train_loss, op=dist.ReduceOp.SUM)
+        # Calculate global average epoch loss
+        epoch_train_loss = total_train_loss.item() / len(train_loader.dataset) if len(train_loader.dataset) > 0 else 0
+
+        if rank == 0:
+             history['train_loss'].append(epoch_train_loss)
+
 
         # --- Validation Phase ---
         model.eval()
@@ -172,81 +206,164 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                             all_val_targets.extend(corr_batch.cpu().numpy())
 
                         except Exception as e:
-                            print(f"Error during validation batch: {e}")
+                            print(f"Error during validation batch on rank {rank}: {e}")
                             continue
 
-            epoch_val_loss = running_val_loss / len(val_loader.dataset)
-            history['val_loss'].append(epoch_val_loss)
+            # Aggregate validation loss across processes
+            total_val_loss = torch.tensor(running_val_loss).to(device)
+            dist.all_reduce(total_val_loss, op=dist.ReduceOp.SUM)
+            epoch_val_loss = total_val_loss.item() / len(val_loader.dataset) if len(val_loader.dataset) > 0 else 0
 
-            # Calculate validation metrics
-            val_pearson_r, _ = pearsonr(all_val_targets, all_val_preds)
-            val_mae = mean_absolute_error(all_val_targets, all_val_preds)
-            history['val_pearson_r'].append(val_pearson_r)
-            history['val_mae'].append(val_mae)
+            if rank == 0:
+                history['val_loss'].append(epoch_val_loss)
 
-            # Log metrics to CSV
-            with open(log_file_path, 'a', newline='') as logfile:
-                logwriter = csv.writer(logfile)
-                logwriter.writerow([epoch + 1, epoch_train_loss, epoch_val_loss, val_pearson_r, val_mae])
+                # Gather predictions and targets from all processes to rank 0
+                gathered_preds = [None] * world_size
+                gathered_targets = [None] * world_size
+                dist.gather_object(all_val_preds, gathered_preds if rank == 0 else None, dst=0)
+                dist.gather_object(all_val_targets, gathered_targets if rank == 0 else None, dst=0)
 
-            # Learning rate scheduler step
+                if rank == 0:
+                    # Concatenate lists from all ranks
+                    all_val_preds_global = [item for sublist in gathered_preds for item in sublist]
+                    all_val_targets_global = [item for sublist in gathered_targets for item in sublist]
+
+                    # Calculate validation metrics on rank 0 using global data
+                    val_pearson_r, _ = pearsonr(all_val_targets_global, all_val_preds_global)
+                    val_mae = mean_absolute_error(all_val_targets_global, all_val_preds_global)
+                    history['val_pearson_r'].append(val_pearson_r)
+                    history['val_mae'].append(val_mae)
+
+                    # Log metrics to CSV
+                    with open(log_file_path, 'a', newline='') as logfile:
+                        logwriter = csv.writer(logfile)
+                        logwriter.writerow([epoch + 1, epoch_train_loss, epoch_val_loss, val_pearson_r, val_mae])
+
+                    print(f"Epoch {epoch+1}/{num_epochs} - "
+                          f"Train Loss: {epoch_train_loss:.4f}, Global Val Loss: {epoch_val_loss:.4f}, "
+                          f"Global Val Pearson R: {val_pearson_r:.4f}, Global Val MAE: {val_mae:.4f} - "
+                          f"Duration: {time.time() - start_time:.2f}s")
+
+
+            # Broadcast the global validation loss from rank 0 to all other ranks for scheduler and early stopping
+            global_val_loss_tensor = torch.tensor(epoch_val_loss).to(device)
+            dist.broadcast(global_val_loss_tensor, src=0)
+            epoch_val_loss_broadcasted = global_val_loss_tensor.item()
+
+            # Learning rate scheduler step - use broadcasted global loss
             if scheduler:
-                scheduler.step(epoch_val_loss)
+                scheduler.step(epoch_val_loss_broadcasted)
 
-            print(f"Epoch {epoch+1}/{num_epochs} - "
-                  f"Train Loss: {epoch_train_loss:.4f}, Val Loss: {epoch_val_loss:.4f}, "
-                  f"Val Pearson R: {val_pearson_r:.4f}, Val MAE: {val_mae:.4f} - "
-                  f"Duration: {time.time() - start_time:.2f}s")
 
         else: # No validation loader or it's empty
             epoch_val_loss = float('inf') # Or some other indicator
-            history['val_loss'].append(None)
-            history['val_pearson_r'].append(None)
-            history['val_mae'].append(None)
-            # Log only train loss if no validation
-            with open(log_file_path, 'a', newline='') as logfile:
-                logwriter = csv.writer(logfile)
-                logwriter.writerow([epoch + 1, epoch_train_loss, None, None, None])
+            if rank == 0:
+                history['val_loss'].append(None)
+                history['val_pearson_r'].append(None)
+                history['val_mae'].append(None)
+                # Log only train loss if no validation
+                with open(log_file_path, 'a', newline='') as logfile:
+                    logwriter = csv.writer(logfile)
+                    logwriter.writerow([epoch + 1, epoch_train_loss, None, None, None])
 
-            print("Validation loader not available or empty, skipping validation phase.")
+                print("Validation loader not available or empty, skipping validation phase.")
 
 
         epoch_duration = time.time() - start_time
-        # Early stopping
+        # Early stopping - use broadcasted global loss
         if val_loader and len(val_loader.dataset) > 0: # Only if validation was performed
-            if epoch_val_loss < best_val_loss:
-                best_val_loss = epoch_val_loss
-                best_model_state = copy.deepcopy(model.state_dict())
-                torch.save(best_model_state, model_save_path)
-                print(f"Validation loss improved. Saved new best model to {model_save_path}")
+            if epoch_val_loss_broadcasted < best_val_loss:
+                best_val_loss = epoch_val_loss_broadcasted
+                if rank == 0:
+                    # Save model only on rank 0
+                    best_model_state = copy.deepcopy(model.module.state_dict()) # Save unwrapped model state_dict
+                    torch.save(best_model_state, model_save_path)
+                    print(f"Validation loss improved. Saved new best model to {model_save_path}")
                 epochs_no_improve = 0
             else:
                 epochs_no_improve += 1
-                print(f"Validation loss did not improve for {epochs_no_improve} epoch(s).")
+                if rank == 0:
+                     print(f"Validation loss did not improve for {epochs_no_improve} epoch(s).")
+                # Broadcast epochs_no_improve to all ranks
+                epochs_no_improve_tensor = torch.tensor(epochs_no_improve).to(device)
+                dist.broadcast(epochs_no_improve_tensor, src=0)
+                epochs_no_improve = epochs_no_improve_tensor.item()
+
                 if epochs_no_improve >= patience:
-                    print(f"Early stopping triggered after {epoch+1} epochs.")
-                    model.load_state_dict(best_model_state) # Load best model weights
-                    return model, history # Return the best model
+                    if rank == 0:
+                         print(f"Early stopping triggered after {epoch+1} epochs.")
+                    # Load best model weights on all ranks
+                    # Need to load the state_dict from the saved file (saved by rank 0)
+                    # Since only rank 0 saves, other ranks need to wait or load from the file
+                    # A simpler approach in DDP is to save/load the DDP model's state_dict directly if continuing distributed training.
+                    # If saving for inference or non-distributed training, save model.module.state_dict().
+                    # For early stopping and continuing distributed training, loading the best state_dict back to DDP model is complex.
+                    # A common pattern is to save the best state_dict on rank 0, and then load it on all ranks.
+                    # Let's load the saved state dict on all ranks.
+                    # Ensure all ranks wait for rank 0 to save.
+                    if rank == 0:
+                        torch.save(best_model_state, model_save_path) # Resave if it was updated
+                    dist.barrier() # Wait for rank 0 to save
+                    # Load state dict on all ranks
+                    map_location = {'cuda:%d' % 0: 'cuda:%d' % rank} # Map saved weights to current rank's device
+                    model.module.load_state_dict(torch.load(model_save_path, map_location=map_location))
+                    return model, history # Return the model with best weights
         elif epoch == num_epochs -1: # If no validation, save last model
-             best_model_state = copy.deepcopy(model.state_dict())
-             torch.save(best_model_state, model_save_path)
-             print(f"Training complete. Saved final model to {MODEL_SAVE_PATH}")
+             if rank == 0:
+                 best_model_state = copy.deepcopy(model.module.state_dict())
+                 torch.save(best_model_state, model_save_path)
+                 print(f"Training complete. Saved final model to {MODEL_SAVE_PATH}")
 
+    # After training, load the best model state if it exists and validation was performed
+    if val_loader and len(val_loader.dataset) > 0 and best_model_state:
+         # Load state dict on all ranks from the best model file saved by rank 0
+         dist.barrier() # Ensure rank 0 has saved the best model
+         map_location = {'cuda:%d' % 0: 'cuda:%d' % rank} # Map saved weights to current rank's device
+         model.module.load_state_dict(torch.load(model_save_path, map_location=map_location))
+    elif epoch == num_epochs -1 and not (val_loader and len(val_loader.dataset) > 0): # If no validation and training finished
+         # The last model was saved by rank 0 in the loop, load it back to module if needed (though it's already loaded)
+         pass # No need to load again, model is already the last trained state
 
-    if best_model_state:
-        model.load_state_dict(best_model_state)
-    return model, history
+    # Synchronize at the end of training
+    dist.barrier()
+
+    # Return the DDP model (or model.module if you only need the core model)
+    # Returning model.module is often more convenient if you don't need DDP wrapper after training
+    return model.module, history
+
 
 
 if __name__ == '__main__':
-    print("--- Full Training Script Simulation ---")
+    # Add argparse for rank and world size
+    parser = argparse.ArgumentParser(description='Distributed Training Script')
+    parser.add_argument('--rank', type=int, help='Rank of the current process (0 to world_size - 1)')
+    parser.add_argument('--world_size', type=int, help='Total number of processes')
+    parser.add_argument('--dist_url', type=str, default='env://', help='url used to set up distributed training')
+    parser.add_argument('--dist_backend', type=str, default='nccl', help='distributed backend')
+    args = parser.parse_args()
+
+    # Initialize the distributed environment
+    print(f"Initializing process group with rank {args.rank} and world size {args.world_size}")
+    dist.init_process_group(
+        backend=args.dist_backend,
+        init_method=args.dist_url,
+        world_size=args.world_size,
+        rank=args.rank
+    )
+
+    # Set up the device for this process
+    # The device should be specific to the rank
+    local_rank = args.rank
+    DEVICE = torch.device(f"cuda:{local_rank}")
+    torch.cuda.set_device(local_rank)
+
+    print(f"--- Training Script (Rank {args.rank}/{args.world_size}) ---")
 
     # 1. Load and Prepare Data
     print("\n[Phase 1: Data Loading and Preparation]")
     dummy_tsv_path = "dummy_gene_pairs.tsv"
     dummy_feature_dir = "dummy_feature_vectors/"
     actual_data_mode = True
-
     if os.path.exists(GENE_PAIRS_TSV_PATH) and os.path.isdir(FEATURE_VECTOR_DIR):
         print(f"Attempting to use actual data paths: {GENE_PAIRS_TSV_PATH}, {FEATURE_VECTOR_DIR}")
         try:
@@ -381,22 +498,28 @@ if __name__ == '__main__':
         print("CRITICAL: Training DataFrame is empty after split. Cannot proceed with training.")
         # Exit or raise error if train_df is empty as training is not possible
     else:
+        # Use DistributedSampler for distributed training
         train_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=train_df)
-        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, collate_fn=None) # Using default collate
-        print(f"Train DataLoader created. Batches: {len(train_loader)}, Samples: {len(train_dataset)}")
+        train_sampler = DistributedSampler(train_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=True)
+        train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, num_workers=0, collate_fn=None) # shuffle=False with sampler
+        print(f"Train DataLoader created for rank {args.rank}. Batches: {len(train_loader)}, Samples: {len(train_dataset)}")
 
         val_loader = None
         if not val_df.empty:
             val_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=val_df)
             if len(val_dataset) > 0:
-                 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, shuffle=True, num_workers=0, collate_fn=None)
-                 print(f"Validation DataLoader created. Batches: {len(val_loader)}, Samples: {len(val_dataset)}")
+                # Use DistributedSampler for validation data as well
+                val_sampler = DistributedSampler(val_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=False)
+                val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, sampler=val_sampler, num_workers=0, collate_fn=None) # shuffle=False with sampler
+                print(f"Validation DataLoader created for rank {args.rank}. Batches: {len(val_loader)}, Samples: {len(val_dataset)}")
             else:
                 print("Validation dataset created but is empty.")
         else:
             print("Validation DataFrame is empty. No validation loader will be used.")
 
         # Test loader (not used in training loop directly here, but good to check)
+        # For evaluation after training, you might want a non-distributed sampler or handle aggregation
+        # For now, keep as is for basic structure but be aware of potential issues in distributed evaluation without proper aggregation.
         if not test_df.empty:
             test_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=test_df)
             if len(test_dataset) > 0:
@@ -423,6 +546,9 @@ if __name__ == '__main__':
         print(f"SiameseGeneTransformer model instantiated on {DEVICE}.")
         print(f"Model total parameters: {sum(p.numel() for p in model.parameters() if p.requires_grad)}")
 
+        # Wrap the model with DistributedDataParallel
+        model = DistributedDataParallel(model, device_ids=[local_rank])
+        print("Model wrapped with DistributedDataParallel.")
 
         criterion = nn.MSELoss()
         optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE, weight_decay=WEIGHT_DECAY)
