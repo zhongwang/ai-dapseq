@@ -583,7 +583,8 @@ if __name__ == '__main__':
                 print(f"Starting training for {NUM_EPOCHS} epochs with early stopping patience {EARLY_STOPPING_PATIENCE}...")
                 trained_model, history = train_model(
                     model, train_loader, val_loader, criterion, optimizer, scheduler,
-                    NUM_EPOCHS, DEVICE, EARLY_STOPPING_PATIENCE, MODEL_SAVE_PATH, log_file_path
+                    NUM_EPOCHS, DEVICE, EARLY_STOPPING_PATIENCE, MODEL_SAVE_PATH, log_file_path,
+                    local_rank, world_size
                 )
                 print("Training finished.")
                 print(f"Best model saved to: {MODEL_SAVE_PATH}")
