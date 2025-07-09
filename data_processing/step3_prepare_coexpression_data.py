@@ -11,9 +11,10 @@ def parse_arguments():
     parser.add_argument("--processed_signals_dir", help="Path to the directory containing .npy files from Step 3.2/3.3 (used for validation if --validate_genes is set).\nAssumes .npy files are named '<gene_id>.npy'.")
     parser.add_argument("--output_file", required=True, help="Path to the output final co-expression TSV file.")
     parser.add_argument("--validate_genes", action='store_true', help="If set, validate that gene IDs in the coexpression file have corresponding processed signal files in --processed_signals_dir.")
+    parser.add_argument("--num_bins", type=int, default=1000, help="Number of bins to use for correlation-based sampling of the training set. Default is 1000.")
     return parser.parse_args()
 
-def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_path, output_file_path, processed_signals_dir_path=None, validate_genes_flag=False):
+def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_path, output_file_path, num_bins, processed_signals_dir_path=None, validate_genes_flag=False):
     """
     Loads, optionally validates, splits by chromosome, samples by correlation bin, and saves co-expression data.
 
@@ -160,8 +161,8 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
         min_corr = train_set['Correlation'].min()
         max_corr = train_set['Correlation'].max()
         # Create 10 equally spaced bins between min and max correlation
-        # Use 11 edges for 10 bins
-        bins = np.linspace(min_corr, max_corr, 11)
+        # Use num_bins + 1 edges for num_bins
+        bins = np.linspace(min_corr, max_corr, num_bins + 1)
         # # Define the number of bins. It was 3 based on the previous linspace call creating 4 edges.
         # num_bins = 1000
         # # Calculate quantiles for the training set correlation data.
@@ -343,6 +344,7 @@ if __name__ == "__main__":
         args.coexpression_file,
         args.gene_chromosome_map_file,
         args.output_file,
+        args.num_bins,
         args.processed_signals_dir,
         args.validate_genes
     )
@@ -354,4 +356,5 @@ if __name__ == "__main__":
 #   --gene_chromosome_map_file "/path/to/your/gene_chromosome_map.tsv" \
 #   --output_file "/path/to/your/final_coexpression_data.tsv" \
 #   --processed_signals_dir "/path/to/your/output_npy_signals/" \
+#   --num_bins 10
 #   --validate_genes``
