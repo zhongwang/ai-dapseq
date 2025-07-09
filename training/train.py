@@ -513,7 +513,7 @@ if __name__ == '__main__':
             val_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=val_df)
             if len(val_dataset) > 0:
                 # Use DistributedSampler for validation data as well
-                val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=local_rank, shuffle=False)
+                val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=local_rank, shuffle=True)
                 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, sampler=val_sampler, num_workers=0, collate_fn=None) # shuffle=False with sampler
                 print(f"Validation DataLoader created for rank {local_rank}. Batches: {len(val_loader)}, Samples: {len(val_dataset)}")
             else:
