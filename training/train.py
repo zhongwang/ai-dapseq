@@ -29,7 +29,7 @@ except ImportError:
 
 
 # --- Configuration (Placeholder paths - adjust as needed) ---
-GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/final_coexpressed_regression_10bins.txt"
+GENE_PAIRS_TSV_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/final_coexpressed_regression_15bins.txt"
 FEATURE_VECTOR_DIR = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/feature_vectors/"
 MODEL_SAVE_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/best_siamese_model.pth"
 GENE_CHROMOSOME_MAPPING_PATH = "/global/scratch/users/sallyliao2027/aidapseq/output/new_full_data/promoter_sequences.txt"
@@ -44,7 +44,7 @@ DROPOUT = 0.1               # Dropout rate in transformer
 AGGREGATION_METHOD = 'cls'  # 'cls' or 'mean'
 MAX_SEQ_LEN = 2501          # Max promoter sequence length for positional encoding
 REGRESSION_HIDDEN_DIM = 128 # Hidden dimension in the regression head
-REGRESSION_DROPOUT = 0.3   # Dropout in the regression head
+REGRESSION_DROPOUT = 0.5   # Dropout in the regression head
 
 # --- Training Hyperparameters ---
 BATCH_SIZE = 32 # Can be small for large models / long sequences
@@ -337,28 +337,31 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
 if __name__ == '__main__':
     # Add argparse for rank and world size
     parser = argparse.ArgumentParser(description='Distributed Training Script')
-    parser.add_argument('--rank', type=int, help='Rank of the current process (0 to world_size - 1)')
-    parser.add_argument('--world_size', type=int, help='Total number of processes')
+    # parser.add_argument('--rank', type=int, help='Rank of the current process (0 to world_size - 1)')
+    # parser.add_argument('--world_size', type=int, help='Total number of processes')
     parser.add_argument('--dist_url', type=str, default='env://', help='url used to set up distributed training')
     parser.add_argument('--dist_backend', type=str, default='nccl', help='distributed backend')
     args = parser.parse_args()
 
-    # Initialize the distributed environment
-    print(f"Initializing process group with rank {args.rank} and world size {args.world_size}")
     dist.init_process_group(
         backend=args.dist_backend,
         init_method=args.dist_url,
-        world_size=args.world_size,
-        rank=args.rank
+        # world_size=args.world_size,
+        # rank=args.rank
     )
+
+    local_rank = dist.get_rank() #args.rank
+    world_size = dist.get_world_size()
+
+    # Initialize the distributed environment
+    print(f"Initializing process group with rank {local_rank} and world size {world_size}")
 
     # Set up the device for this process
     # The device should be specific to the rank
-    local_rank = args.rank
     DEVICE = torch.device(f"cuda:{local_rank}")
     torch.cuda.set_device(local_rank)
 
-    print(f"--- Training Script (Rank {args.rank}/{args.world_size}) ---")
+    print(f"--- Training Script (Rank {local_rank}/{world_size}) ---")
 
     # 1. Load and Prepare Data
     print("\n[Phase 1: Data Loading and Preparation]")
@@ -501,18 +504,18 @@ if __name__ == '__main__':
     else:
         # Use DistributedSampler for distributed training
         train_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=train_df)
-        train_sampler = DistributedSampler(train_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=True)
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=local_rank, shuffle=True)
         train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, sampler=train_sampler, num_workers=0, collate_fn=None) # shuffle=False with sampler
-        print(f"Train DataLoader created for rank {args.rank}. Batches: {len(train_loader)}, Samples: {len(train_dataset)}")
+        print(f"Train DataLoader created for rank {local_rank}. Batches: {len(train_loader)}, Samples: {len(train_dataset)}")
 
         val_loader = None
         if not val_df.empty:
             val_dataset = GenePairDataset(feature_dir=current_feature_dir, gene_pairs_df=val_df)
             if len(val_dataset) > 0:
                 # Use DistributedSampler for validation data as well
-                val_sampler = DistributedSampler(val_dataset, num_replicas=args.world_size, rank=args.rank, shuffle=False)
+                val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=local_rank, shuffle=False)
                 val_loader = DataLoader(val_dataset, batch_size=BATCH_SIZE, sampler=val_sampler, num_workers=0, collate_fn=None) # shuffle=False with sampler
-                print(f"Validation DataLoader created for rank {args.rank}. Batches: {len(val_loader)}, Samples: {len(val_dataset)}")
+                print(f"Validation DataLoader created for rank {local_rank}. Batches: {len(val_loader)}, Samples: {len(val_dataset)}")
             else:
                 print("Validation dataset created but is empty.")
         else:
