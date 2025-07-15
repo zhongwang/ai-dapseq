@@ -11,6 +11,8 @@ import torch.distributed as dist
 from torch.nn.parallel import DistributedDataParallel as DDP
 import logging
 from tqdm import tqdm
+import csv
+from scipy.stats import pearsonr
 
 # It's good practice to import the model from its source file
 # Add model directory to Python path to allow direct import
@@ -136,6 +138,11 @@ def train_model(args):
     # --- Data Loading ---
     if rank == 0:
         logging.info("Loading data...")
+        # Setup CSV log file
+        with open(args.log_file, 'w', newline='') as f:
+            writer = csv.writer(f)
+            writer.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
+            
     all_pairs_df = pd.read_csv(args.pairs_file, sep='\t')
     gene_chrom_map = pd.read_csv(args.gene_info_file, sep='\t')
     
@@ -231,6 +238,8 @@ def train_model(args):
         # --- Validation Loop ---
         ddp_model.eval()
         total_val_loss = 0
+        all_val_preds = []
+        all_val_labels = []
         with torch.no_grad():
             val_loader_tqdm = tqdm(val_loader, desc="Validation", disable=(rank != 0))
             for batch in val_loader_tqdm:
@@ -249,13 +258,43 @@ def train_model(args):
                 loss = criterion(outputs, batch['labels'])
                 total_val_loss += loss.item()
 
+                # Gather predictions and labels from all GPUs
+                all_val_preds.append(outputs.cpu())
+                all_val_labels.append(batch['labels'].cpu())
+
+        # Combine predictions and labels from all batches
+        all_val_preds = torch.cat(all_val_preds)
+        all_val_labels = torch.cat(all_val_labels)
+        
+        # Collect results from all processes
+        if world_size > 1:
+            # Create tensors to store gathered data on each process
+            gathered_preds = [torch.zeros_like(all_val_preds) for _ in range(world_size)]
+            gathered_labels = [torch.zeros_like(all_val_labels) for _ in range(world_size)]
+            
+            dist.all_gather(gathered_preds, all_val_preds)
+            dist.all_gather(gathered_labels, all_val_labels)
+
+            if rank == 0:
+                all_val_preds = torch.cat(gathered_preds)
+                all_val_labels = torch.cat(gathered_labels)
+        
         avg_val_loss = total_val_loss / len(val_loader)
 
         # Log, save model, and check for early stopping only on the main process
         stop_signal = torch.tensor(0.0, device=local_rank)
         if rank == 0:
-            logging.info(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f}")
+            # Calculate metrics on rank 0 with all data
+            val_mae = nn.L1Loss()(all_val_preds, all_val_labels).item()
+            val_pearson_r, _ = pearsonr(all_val_preds.numpy().flatten(), all_val_labels.numpy().flatten())
             
+            logging.info(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Pearson R: {val_pearson_r:.4f} | Val MAE: {val_mae:.4f}")
+
+            # Log to CSV
+            with open(args.log_file, 'a', newline='') as f:
+                writer = csv.writer(f)
+                writer.writerow([epoch + 1, avg_train_loss, avg_val_loss, val_pearson_r, val_mae])
+
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 torch.save(ddp_model.module.state_dict(), args.save_path)
@@ -310,6 +349,7 @@ def main():
     parser.add_argument('--feature_dir', type=str, required=True, help="Directory containing gene feature vectors (.npy files).")
     parser.add_argument('--gene_info_file', type=str, required=True, help="Path to the TSV file mapping gene IDs to chromosomes.")
     parser.add_argument('--save_path', type=str, required=True, help="Path to save the final trained model.")
+    parser.add_argument('--log_file', type=str, default='training_log.csv', help="Path to save the training log CSV.")
     
     # Model Hyperparameters
     parser.add_argument('--d_model', type=int, default=256, help="Internal dimension of the transformer model.")

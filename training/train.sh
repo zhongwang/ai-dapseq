@@ -11,4 +11,4 @@
 eval "$(conda shell.bash hook)"
 cd /global/scratch/users/sallyliao2027/aidapseq
 source .venv/bin/activate
-python ./training/train.py
+python ./training/train_siamese_transformer.py
