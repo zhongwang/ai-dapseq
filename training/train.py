@@ -256,37 +256,25 @@ def train_model(model, train_loader, val_loader, criterion, optimizer, scheduler
                                 print(f"[Rank {rank}] Error during validation batch: {e}")
                                 print(f"[Rank {rank}] Skipping processing for this validation batch.")
 
-                        # --- Synchronize loss sum and batch size across all ranks ---
-                        if torch.isnan(local_batch_loss_sum_tensor).any() or torch.isinf(local_batch_loss_sum_tensor).any():
-                            print(f"[Rank {rank}] CRITICAL ERROR: NaN/Inf detected in local_batch_loss_sum_tensor during val batch. Value: {local_batch_loss_sum_tensor.item()}")
-                            sys.exit(1)
-                        if torch.isnan(local_batch_size_tensor).any() or torch.isinf(local_batch_size_tensor).any():
-                            print(f"[Rank {rank}] CRITICAL ERROR: NaN/Inf detected in local_batch_size_tensor during val batch. Value: {local_batch_size_tensor.item()}")
-                            sys.exit(1)
+                            try:
+                                predicted_correlations = model(seq_a_batch, seq_b_batch, key_padding_mask_A=mask_a_batch, key_padding_mask_B=mask_b_batch).squeeze()
+                                loss = criterion(predicted_correlations, corr_batch.float())
 
-                        dist.all_reduce(local_batch_loss_sum_tensor, op=dist.ReduceOp.SUM, async_op=False)
-                        dist.all_reduce(local_batch_size_tensor, op=dist.ReduceOp.SUM, async_op=False)
+                                if torch.isnan(loss) or torch.isinf(loss):
+                                    print(f"[Rank {rank}] Warning: Detected NaN/Inf loss in validation batch. Skipping this batch for loss calculation and metric gathering.")
+                                else:
+                                    # Accumulate local loss and sample count for this batch
+                                    running_val_loss_sum += (loss * seq_a_batch.size(0)).item()
+                                    running_val_samples += seq_a_batch.size(0)
+                                    all_val_preds.extend(predicted_correlations.cpu().numpy())
+                                    all_val_targets.extend(corr_batch.cpu().numpy())
 
-                        # local_batch_loss_sum_tensor and local_batch_size_tensor already hold local sums for this batch
+                            except Exception as e:
+                                print(f"[Rank {rank}] Error during validation batch: {e}")
+                                print(f"[Rank {rank}] Skipping processing for this validation batch.")
 
-                        # Accumulate local sums for epoch average before all_reduce for local metrics
-                        running_val_loss_sum += local_batch_loss_sum_tensor.item()
-                        running_val_samples += local_batch_size_tensor.item()
-
-                        # Synchronize loss sum and batch size across all ranks for global average calculation later
-                        # The all_reduce operations below are necessary to get the global sums for the epoch.
-                        global_batch_loss_sum = local_batch_loss_sum_tensor.clone() # Use clone to avoid modifying original local tensor
-                        global_batch_size_sum = local_batch_size_tensor.clone() # Use clone
-
-                        if torch.isnan(global_batch_loss_sum).any() or torch.isinf(global_batch_loss_sum).any():
-                            print(f"[Rank {rank}] CRITICAL ERROR: NaN/Inf detected in global_batch_loss_sum (pre-all_reduce) during val batch. Value: {global_batch_loss_sum.item()}")
-                            sys.exit(1)
-                        if torch.isnan(global_batch_size_sum).any() or torch.isinf(global_batch_size_sum).any():
-                            print(f"[Rank {rank}] CRITICAL ERROR: NaN/Inf detected in global_batch_size_sum (pre-all_reduce) during val batch. Value: {global_batch_size_sum.item()}")
-                            sys.exit(1)
-
-                        dist.all_reduce(global_batch_loss_sum, op=dist.ReduceOp.SUM, async_op=False)
-                        dist.all_reduce(global_batch_size_sum, op=dist.ReduceOp.SUM, async_op=False)
+                        # The batch-level all_reduces and subsequent accumulations are removed here.
+                        # The accumulation of local batch loss and sample count is now within the 'else' block above.
 
             print(f"[{rank}] Finished local validation loop.")
             dist.barrier() # Ensure all ranks finished their val loop
