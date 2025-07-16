@@ -16,6 +16,11 @@ import pandas as pd
 import os
 from multiprocessing import Pool, cpu_count
 import hdbscan
+import matplotlib.pyplot as plt
+import seaborn as sns
+import umap
+from sklearn.metrics import calinski_harabasz_score, davies_bouldin_score
+
 
 # Define constants for one-hot encoding
 DNA_ONE_HOT_MAP = {
@@ -141,6 +146,51 @@ def prepare_gene_features(gene_id, dna_sequence, tf_signals_dir, max_promoter_le
     return features
 
 
+def visualize_clusters(features, labels, output_dir):
+    """
+    Visualize clusters using UMAP for dimensionality reduction.
+    Saves the plot to a file.
+    """
+    print("Reducing dimensionality for visualization using UMAP...")
+    
+    # UMAP for dimensionality reduction
+    reducer = umap.UMAP(n_neighbors=100, min_dist=0.1, n_components=2, random_state=42)
+    embedding = reducer.fit_transform(features)
+    
+    # Create a DataFrame for plotting
+    df_viz = pd.DataFrame(embedding, columns=['UMAP1', 'UMAP2'])
+    df_viz['Cluster'] = labels
+    
+    # Number of clusters (excluding noise)
+    n_clusters = len(pd.unique(labels[labels != -1]))
+    
+    print(f"Plotting {n_clusters} clusters and noise...")
+    
+    # Plotting
+    plt.figure(figsize=(12, 10))
+    # Plot noise points first (in gray)
+    noise = df_viz[df_viz['Cluster'] == -1]
+    plt.scatter(noise['UMAP1'], noise['UMAP2'], c='lightgray', label='Noise', s=5, alpha=0.5)
+    
+    # Plot clustered points
+    clustered = df_viz[df_viz['Cluster'] != -1]
+    sns.scatterplot(x='UMAP1', y='UMAP2', hue='Cluster', data=clustered,
+                    palette=sns.color_palette("hsv", n_colors=n_clusters),
+                    s=10, alpha=0.8, legend='full')
+    
+    plt.title(f'UMAP projection of the {n_clusters} clusters')
+    plt.xlabel('UMAP Component 1')
+    plt.ylabel('UMAP Component 2')
+    plt.legend(title='Cluster', bbox_to_anchor=(1.05, 1), loc='upper left')
+    
+    # Save the plot
+    plot_path = os.path.join(output_dir, "cluster_visualization.png")
+    plt.savefig(plot_path, bbox_inches='tight')
+    plt.close()
+    
+    print(f"Cluster visualization saved to {plot_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Generate tokenized feature vectors for promoter sequences using global clustering.")
     parser.add_argument("--dna_input_file", type=str, required=True,
@@ -218,7 +268,34 @@ def main():
     num_clusters = len(set(global_cluster_labels)) - (1 if -1 in global_cluster_labels else 0)
     print(f"HDBSCAN found {num_clusters} clusters and {np.sum(global_cluster_labels == -1)} noise points.")
 
-    # 4. Save tokenized vectors for each gene
+    # 4. Evaluate clustering performance and visualize
+    if num_clusters > 1:
+        # We need at least 2 clusters to calculate these scores.
+        clustered_features = all_windows_features_np[global_cluster_labels != -1]
+        clustered_labels = global_cluster_labels[global_cluster_labels != -1]
+        
+        # Performance metrics
+        ch_score = calinski_harabasz_score(clustered_features, clustered_labels)
+        db_score = davies_bouldin_score(clustered_features, clustered_labels)
+
+        # Save performance report
+        report_path = os.path.join(args.output_dir, "clustering_performance_report.txt")
+        with open(report_path, 'w') as f:
+            f.write("Clustering Performance Report\n")
+            f.write("="*30 + "\n")
+            f.write(f"Number of clusters found: {num_clusters}\n")
+            f.write(f"Number of noise points: {np.sum(global_cluster_labels == -1)}\n")
+            f.write(f"Calinski-Harabasz Score: {ch_score:.4f}\n")
+            f.write(f"Davies-Bouldin Score: {db_score:.4f}\n")
+        
+        print(f"Clustering performance report saved to {report_path}")
+
+        # Visualize clusters
+        visualize_clusters(all_windows_features_np, global_cluster_labels, args.output_dir)
+    else:
+        print("Skipping performance evaluation and visualization as less than 2 clusters were found.")
+
+    # 5. Save tokenized vectors for each gene
     print("Saving tokenized feature vectors for each gene...")
     success_count = 0
     for gene_id, (start_idx, end_idx) in gene_window_info.items():
