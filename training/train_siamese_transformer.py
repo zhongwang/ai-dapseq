@@ -258,33 +258,39 @@ def train_model(args):
                 loss = criterion(outputs, batch['labels'])
                 total_val_loss += loss.item()
 
-                # Gather predictions and labels from all GPUs
-                all_val_preds.append(outputs.cpu())
-                all_val_labels.append(batch['labels'].cpu())
+                # Gather predictions and labels on the current GPU device
+                all_val_preds.append(outputs)
+                all_val_labels.append(batch['labels'])
 
-        # Combine predictions and labels from all batches
+        # Combine predictions and labels from all batches on the current GPU
         all_val_preds = torch.cat(all_val_preds)
         all_val_labels = torch.cat(all_val_labels)
         
         # Collect results from all processes
         if world_size > 1:
-            # Create tensors to store gathered data on each process
-            gathered_preds = [torch.zeros_like(all_val_preds) for _ in range(world_size)]
-            gathered_labels = [torch.zeros_like(all_val_labels) for _ in range(world_size)]
+            # Tensors for gathering must be on the correct device (GPU).
+            gathered_preds = [torch.zeros_like(all_val_preds, device=local_rank) for _ in range(world_size)]
+            gathered_labels = [torch.zeros_like(all_val_labels, device=local_rank) for _ in range(world_size)]
             
+            # Perform the all_gather operation on GPU tensors.
             dist.all_gather(gathered_preds, all_val_preds)
             dist.all_gather(gathered_labels, all_val_labels)
 
             if rank == 0:
-                all_val_preds = torch.cat(gathered_preds)
-                all_val_labels = torch.cat(gathered_labels)
+                # On rank 0, concatenate results and move to CPU for metrics.
+                all_val_preds = torch.cat(gathered_preds).cpu()
+                all_val_labels = torch.cat(gathered_labels).cpu()
+        else:
+            # If not distributed, just move results to CPU for metrics.
+            all_val_preds = all_val_preds.cpu()
+            all_val_labels = all_val_labels.cpu()
         
         avg_val_loss = total_val_loss / len(val_loader)
 
         # Log, save model, and check for early stopping only on the main process
         stop_signal = torch.tensor(0.0, device=local_rank)
         if rank == 0:
-            # Calculate metrics on rank 0 with all data
+            # Calculate metrics on rank 0 with all data (now on CPU)
             val_mae = nn.L1Loss()(all_val_preds, all_val_labels).item()
             val_pearson_r, _ = pearsonr(all_val_preds.numpy().flatten(), all_val_labels.numpy().flatten())
             
@@ -330,12 +336,19 @@ def train_model(args):
                 for key, value in batch.items():
                     if isinstance(value, torch.Tensor):
                         batch[key] = value.to(local_rank)
-                
-                outputs = model(**batch)
+
+                model_inputs = {
+                    'promoter_sequence_A': batch['promoter_sequence_A'],
+                    'promoter_sequence_B': batch['promoter_sequence_B'],
+                    'key_padding_mask_A': batch['key_padding_mask_A'],
+                    'key_padding_mask_B': batch['key_padding_mask_B']
+                }
+
+                outputs = ddp_model(**model_inputs)
                 loss = criterion(outputs, batch['labels'])
                 total_test_loss += loss.item()
         
-        avg_test_loss = total_test_loss / len(test_loader_final)
+        avg_test_loss = total_test_loss / len(test_loader)
         logging.info(f"Final Test Loss: {avg_test_loss:.4f}")
 
     cleanup()
