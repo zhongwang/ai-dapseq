@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import os
 from multiprocessing import Pool, cpu_count
-from sklearn.cluster import KMeans
+import hdbscan
 
 # Define constants for one-hot encoding
 DNA_ONE_HOT_MAP = {
@@ -157,7 +157,7 @@ def main():
     parser.add_argument("--stride", type=int, default=10, help="Stride of the sliding window.")
     parser.add_argument("--agg_method", type=str, default='mean', choices=['mean', 'max', 'sum'],
                         help="Aggregation method for the sliding window.")
-    parser.add_argument("--n_clusters", type=int, default=100, help="Number of clusters for KMeans.")
+    parser.add_argument("--min_cluster_size", type=int, default=100, help="Minimum cluster size for HDBSCAN.")
 
     args = parser.parse_args()
 
@@ -208,14 +208,15 @@ def main():
     # 3. Perform global clustering on all windows
     print(f"Performing global clustering on {len(all_windows_features)} windows...")
     all_windows_features_np = np.array(all_windows_features, dtype=np.float32)
-    
-    # Adjust n_clusters if there are fewer unique windows than requested clusters
-    if len(all_windows_features) < args.n_clusters:
-        print(f"Warning: Number of windows ({len(all_windows_features)}) is less than n_clusters ({args.n_clusters}). Setting n_clusters to {len(all_windows_features)}.")
-        args.n_clusters = len(all_windows_features)
 
-    kmeans = KMeans(n_clusters=args.n_clusters, random_state=0, n_init=10, n_jobs=-1)
-    global_cluster_labels = kmeans.fit_predict(all_windows_features_np)
+    hdb = hdbscan.HDBSCAN(min_cluster_size=args.min_cluster_size,
+                          gen_min_span_tree=True) # gen_min_span_tree can be useful for visualization/understanding
+    global_cluster_labels = hdb.fit_predict(all_windows_features_np)
+
+    # Noise points are labeled as -1. We can either keep them or handle them.
+    # For now, we will keep them as a special token.
+    num_clusters = len(set(global_cluster_labels)) - (1 if -1 in global_cluster_labels else 0)
+    print(f"HDBSCAN found {num_clusters} clusters and {np.sum(global_cluster_labels == -1)} noise points.")
 
     # 4. Save tokenized vectors for each gene
     print("Saving tokenized feature vectors for each gene...")

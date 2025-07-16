@@ -13,6 +13,7 @@ torch
 scikit-learn
 transformers
 pandas
+hdbscan
 
 # Visualization
 matplotlib
