@@ -48,7 +48,10 @@ The primary objective of this module is to process the raw genomic, transcriptom
 -   **Process:**
     1.  **Load Data:** Load the TSV file using `pandas` into a DataFrame.
     2.  **Validation (Optional but Recommended):** Ensure that `Gene1` and `Gene2` in this file correspond to gene IDs for which promoter sequences and TF binding data have been processed in the previous steps. Filter pairs if necessary.
--   **Output:** A final TSV file (e.g., `final_coexpression_data.tsv`) with columns: `Gene1`, `Gene2`, `Correlation`. This file is ready for use in model training and evaluation.
+-   **Negative Sampling:**
+    1.  **Identify Positive Examples:** Gene pairs listed in the input file will constitute the positive examples for co-expression (label = 1).
+    2.  **Negative Sampling Strategy:** Randomly sample pairs of genes that are not present in the positive set. The number of negative samples should be carefully chosen relative to the number of positive samples (e.g., 1:1, 1:3, 1:5, or 1:10).
+-   **Output:** A final TSV file (e.g., `final_coexpression_data.tsv`) with columns: `Gene1`, `Gene2`, `Correlation`, and `Label`. This file is ready for use in model training and evaluation.
 
 ## 4. Recommended Libraries
 

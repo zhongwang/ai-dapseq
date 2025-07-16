@@ -6,7 +6,7 @@ This project aims to develop a machine learning model to predict gene co-express
 
 The project follows a modular pipeline:
 1.  **Data Preprocessing:** Ingests raw genomic, transcriptomic, and co-expression data and prepares it for feature engineering.
-2.  **TF Vocabulary Feature Engineering:** Creates input sequences by concatenating per-base DNA sequence vectors and TF-DAPseq vectors.
+2.  **Feature Engineering:** Creates tokenized feature vectors for each gene's promoter region using a sliding window, aggregation, and clustering approach.
 3.  **Siamese Transformer Implementation:** Builds the Siamese transformer model in PyTorch.
 4.  **Model Training & Evaluation:** Trains, tunes, and evaluates the model's performance.
 5.  **Visualization & Interpretation:** Creates tools for visualizing model performance and interpreting predictions.
@@ -34,7 +34,7 @@ The scripts in the `data_processing/` directory should generally be run in the f
 *   `python data_processing/step1_extract_promoter_sequences.py`: Extracts promoter sequences.
 *   `python data_processing/step2_extract_tf_binding_signals.py`: Extracts TF binding signals.
 *   `python data_processing/step3_prepare_coexpression_data.py`: Prepares gene co-expression data.
-*   `python data_processing/step4_create_feature_vectors.py`: Creates feature vectors for the model.
+*   `python data_processing/step4_create_tokenized_feature_vectors.py`: Creates tokenized feature vectors for the model.
 
 Auxiliary scripts:
 *   `python data_processing/plot_normalization_effects.py`: Plots the effects of normalization (can be run after relevant data processing steps).
@@ -60,11 +60,11 @@ ai-dapseq/
 │   ├── step1_extract_promoter_sequences.py
 │   ├── step2_extract_tf_binding_signals.py
 │   ├── step3_prepare_coexpression_data.py
-│   └── step4_create_feature_vectors.py
+│   └── step4_create_tokenized_feature_vectors.py
 ├── docs/
 │   ├── implementation_plan_overview.md
 │   ├── module_1_data_preprocessing.md
-│   ├── module_2_tf_vocabulary.md
+│   ├── module_2_feature_engineering.md
 │   ├── module_3_model_implementation.md
 │   ├── module_4_model_training.md
 │   ├── module_5_visualization.md
@@ -83,7 +83,7 @@ ai-dapseq/
 The project is divided into the following key modules:
 
 *   **Module 1: Data Curation and Preprocessing:** Processes raw data into a structured format.
-*   **Module 2: "TF Vocabulary" Feature Engineering:** Generates feature vectors for promoter regions by concatenating DNA sequence information and TF binding affinities.
+*   **Module 2: Feature Engineering:** Generates tokenized feature vectors for promoter regions using a sliding window, aggregation, and clustering approach.
 *   **Module 3: Siamese Transformer Model Implementation:** Implements the Siamese transformer model architecture.
 *   **Module 4: Model Training and Evaluation:** Manages the training, validation, and testing pipelines.
 *   **Module 5: Visualization and Interpretation:** Develops scripts for visualizing results and interpreting model predictions.

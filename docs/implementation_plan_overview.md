@@ -18,8 +18,8 @@ The overall workflow is as follows:
 graph TD
     A[Raw Data <br/> promoter BED, FASTA, bigWig, TSV] --> B{Module 1: Data Preprocessing};
     B --> C[Per-base TF Affinities, Promoter Sequences & Gene Pair Co-expression Coefficients];
-    C --> D{Module 2: TF Vocabulary Feature Engineering};
-    D --> E[Promoter Sequences of Concatenated Per-Base Features];
+    C --> D{Module 2: Feature Engineering};
+    D --> E[Tokenized Feature Vectors];
     E --> F{Module 3: Siamese Transformer Implementation};
     F --> G[Trainable Model];
     G --> H{Module 4: Model Training & Evaluation};
@@ -40,15 +40,14 @@ graph TD
     - Prepare the dataset of gene pairs with co-expression correlation coefficients (provided TSV).
 - **Deliverable:** A set of curated data files containing: per-base normalized TF binding signals for promoter regions, the corresponding promoter DNA sequences, and a dataset of gene pairs with their associated co-expression correlation coefficients.
 
-### Module 2: "TF Vocabulary" Feature Engineering
+### Module 2: Feature Engineering
 - **Lead Engineer:** TBD
-- **Objective:** To implement the feature engineering process, creating input sequences by concatenating per-base DNA sequence vectors and TF-DAPseq vectors.
+- **Objective:** To implement the feature engineering process, creating tokenized feature vectors for each gene's promoter region.
 - **Key Responsibilities:**
-    - Develop a pipeline to generate feature vectors for each base in the promoter regions.
-    - For each base, concatenate:
-        - A one-hot encoded DNA sequence vector (A, C, G, T), including representations for a pad token ([0,0,0,0]) and 'N' ([1,1,1,1]).
-        - A TF-DAPseq vector consisting of 300 TF binding affinity values specific to that base.
-- **Deliverable:** A dataset where each gene's promoter is represented as a sequence of these concatenated (one-hot DNA + TF affinity) feature vectors.
+    - Develop a pipeline to generate tokenized feature vectors using a sliding window, aggregation, and clustering approach.
+    - Concatenate one-hot encoded DNA with TF binding signals.
+    - Apply a sliding window to the concatenated data, aggregate features within each window, and cluster the results to create a final tokenized vector.
+- **Deliverable:** A dataset where each gene's promoter is represented as a 1D tokenized vector.
 
 ### Module 3: Siamese Transformer Model Implementation
 - **Lead Engineer:** TBD
