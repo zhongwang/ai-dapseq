@@ -12,4 +12,4 @@
 eval "$(conda shell.bash hook)"
 cd /global/scratch/users/sallyliao2027/aidapseq
 source .venv/bin/activate
-torchrun --nproc_per_node=8 ./training/train_siamese_transformer.py --pairs_file ./output/new_full_data/final_coexpressed_regression.txt --feature_dir ./output/new_full_data/feature_vectors --gene_info_file ./output/new_full_data/promoter_sequences.txt --save_path ./output/new_full_data/visualizations_5bins/best_siamese_model.pth --log_file ./output/new_full_data/visualizations_5bins/training_log.csv --epochs 10
+torchrun --nproc_per_node=8 ./training/train_siamese_transformer.py --pairs_file ./output/new_full_data/final_coexpressed_regression.txt --feature_dir ./output/new_full_data/feature_vectors --gene_info_file ./output/new_full_data/promoter_sequences.txt --save_path ./output/new_full_data/visualizations_5bins/best_siamese_model.pth --log_file ./output/new_full_data/visualizations_5bins/training_log.csv --epochs 10 --dropout 0.4 --regression_dropout 0.4 --num_encoder_layers 2

@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH -N 1
-#SBATCH -p lr4
+#SBATCH -p lr7
 #SBATCH -A pc_jgiga
-#SBATCH -t 5:0:0
+#SBATCH -t 20:0:0
 #SBATCH --ntasks 1
 #SBATCH --cpus-per-task 8
 #SBATCH -q lr_normal
