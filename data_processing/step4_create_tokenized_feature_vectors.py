@@ -147,7 +147,7 @@ def prepare_gene_features(gene_id, dna_sequence, tf_signals_dir, max_promoter_le
     return features
 
 
-def visualize_clusters(features, labels, output_dir):
+def visualize_clusters(features, labels, output_dir, n_jobs=-1):
     """
     Visualize clusters using UMAP for dimensionality reduction.
     Saves the plot to a file.
@@ -155,7 +155,7 @@ def visualize_clusters(features, labels, output_dir):
     print("Reducing dimensionality for visualization using UMAP...")
     
     # UMAP for dimensionality reduction
-    reducer = umap.UMAP(n_neighbors=100, min_dist=0.1, n_components=2, random_state=42)
+    reducer = umap.UMAP(n_neighbors=100, min_dist=0.1, n_components=2, random_state=42, n_jobs=n_jobs)
     embedding = reducer.fit_transform(features)
     
     # Create a DataFrame for plotting
@@ -209,10 +209,16 @@ def main():
     parser.add_argument("--agg_method", type=str, default='mean', choices=['mean', 'max', 'sum'],
                         help="Aggregation method for the sliding window.")
     parser.add_argument("--min_cluster_size", type=int, default=100, help="Minimum cluster size for HDBSCAN.")
+    parser.add_argument("--n_jobs", type=int, default=-1, help="Number of jobs for parallel processing. -1 means using all available CPUs.")
 
     args = parser.parse_args()
 
     os.makedirs(args.output_dir, exist_ok=True)
+    
+    n_jobs = args.n_jobs
+    if n_jobs == -1:
+        n_jobs = cpu_count()
+    print(f"Using {n_jobs} parallel jobs.")
 
     # 1. Load all DNA sequences
     print(f"Loading DNA sequences from {args.dna_input_file}...")
@@ -222,35 +228,26 @@ def main():
         return
     print(f"Loaded {len(dna_sequences_df)} DNA sequences.")
 
-    # 2. Extract windowed features from all genes
-    print("Extracting windowed features from all genes...")
+    # 2. Extract windowed features from all genes in parallel
+    print("Extracting windowed features from all genes in parallel...")
     all_windows_features = []
     gene_window_info = {}
+    
+    tasks = [(row['gene_id'], row['promoter_dna_sequence'], args.tf_signals_dir, args.max_promoter_length,
+              args.expected_num_tfs, args.window_size, args.stride, args.agg_method)
+             for _, row in dna_sequences_df.iterrows()]
+
+    with Pool(processes=n_jobs) as pool:
+        results = pool.map(process_gene_for_features_worker, tasks)
+
     processed_genes = 0
-
-    for _, row in dna_sequences_df.iterrows():
-        gene_id = row['gene_id']
-        dna_sequence = row['promoter_dna_sequence']
-        if not isinstance(dna_sequence, str):
-            print(f"Warning: DNA sequence for gene {gene_id} is not a string. Skipping.")
-            continue
-        
-        # Prepare feature matrix for the current gene
-        features = prepare_gene_features(gene_id, dna_sequence, args.tf_signals_dir, args.max_promoter_length, args.expected_num_tfs)
-        if features is None:
-            continue
-
-        # Generate aggregated features for each window
-        gene_windows = get_aggregated_windows_from_features(features, args.window_size, args.stride, args.agg_method)
-
-        if gene_windows.shape[0] > 0:
+    for gene_id, gene_windows in results:
+        if gene_windows is not None:
             start_index = len(all_windows_features)
             all_windows_features.extend(gene_windows)
             end_index = len(all_windows_features)
             gene_window_info[gene_id] = (start_index, end_index)
             processed_genes += 1
-        else:
-            print(f"Warning: No windows generated for gene {gene_id}. It might be shorter than the window size.")
 
     if not all_windows_features:
         print("No features were extracted from any gene. Exiting.")
@@ -277,10 +274,26 @@ def main():
 
     print(f"Performing clustering on {len(training_windows_features)} windows from training genes...")
     hdb = hdbscan.HDBSCAN(min_cluster_size=args.min_cluster_size,
-                          gen_min_span_tree=True)
+                          gen_min_span_tree=True,
+                          core_dist_n_jobs=n_jobs)
     hdb.fit(training_windows_features)
 
     # With the clusters defined, create embeddings for all genomes
+    # Visualize clusters on all data
+    visualize_clusters(all_windows_features_np, global_cluster_labels, args.output_dir, n_jobs=n_jobs)
+
+    # 5. Save tokenized vectors for each gene in parallel
+    print("Saving tokenized feature vectors for each gene in parallel...")
+    
+    save_tasks = [(gene_id, start_idx, end_idx, args.output_dir)
+                  for gene_id, (start_idx, end_idx) in gene_window_info.items()]
+
+    with Pool(processes=n_jobs, initializer=init_worker_saving, initargs=(global_cluster_labels,)) as pool:
+        save_results = pool.map(save_gene_vector_worker, save_tasks)
+    
+    success_count = sum(save_results)
+            
+    print(f"\nFeature generation complete.")
     print(f"Predicting clusters for all {len(all_windows_features_np)} windows...")
     global_cluster_labels, _ = hdbscan.approximate_predict(hdb, all_windows_features_np)
 
@@ -332,5 +345,52 @@ def main():
     print(f"Total genes with extracted features: {processed_genes}")
     print(f"Tokenized vectors saved for {success_count} genes in {args.output_dir}")
 
+# Global variable for worker processes, to hold the large cluster labels array
+_global_cluster_labels = None
+
+def init_worker_saving(global_cluster_labels_arr):
+    """Initializer for the saving worker pool."""
+    global _global_cluster_labels
+    _global_cluster_labels = global_cluster_labels_arr
+
+def save_gene_vector_worker(params):
+    """
+    Worker function to save the tokenized vector for a single gene.
+    """
+    gene_id, start_idx, end_idx, output_dir = params
+    gene_cluster_labels = _global_cluster_labels[start_idx:end_idx]
+    try:
+        output_path = os.path.join(output_dir, f"{gene_id}.npy")
+        np.save(output_path, gene_cluster_labels.astype(np.float32))
+        return True
+    except Exception as e:
+        print(f"Error saving features for {gene_id}: {e}")
+        return False
+
+def process_gene_for_features_worker(params):
+    """
+    Worker function to process a single gene.
+    Loads data, prepares features, and generates windowed aggregates.
+    Designed for use with multiprocessing.Pool.
+    """
+    gene_id, dna_sequence, tf_signals_dir, max_promoter_length, expected_num_tfs, window_size, stride, agg_method = params
+
+    if not isinstance(dna_sequence, str):
+        print(f"Warning: DNA sequence for gene {gene_id} is not a string. Skipping.")
+        return gene_id, None
+    
+    # Prepare feature matrix for the current gene
+    features = prepare_gene_features(gene_id, dna_sequence, tf_signals_dir, max_promoter_length, expected_num_tfs)
+    if features is None:
+        return gene_id, None
+
+    # Generate aggregated features for each window
+    gene_windows = get_aggregated_windows_from_features(features, window_size, stride, agg_method)
+
+    if gene_windows.shape[0] > 0:
+        return gene_id, gene_windows
+    else:
+        print(f"Warning: No windows generated for gene {gene_id}. It might be shorter than the window size.")
+        return gene_id, None
 if __name__ == "__main__":
     main()
