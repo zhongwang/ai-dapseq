@@ -199,7 +199,7 @@ def train_model(args):
     ddp_model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     
     criterion = nn.MSELoss() # Mean Squared Error for regression
-    optimizer = optim.Adam(ddp_model.parameters(), lr=args.learning_rate)
+    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.learning_rate, weight_decay = args.weight_decay)
     
     best_val_loss = float('inf')
     epochs_no_improve = 0
@@ -374,6 +374,7 @@ def main():
     parser.add_argument('--max_seq_len', type=int, default=2501, help="Maximum sequence length for positional encoding.")
     parser.add_argument('--regression_hidden_dim', type=int, default=128, help="Hidden dimension of the regression head.")
     parser.add_argument('--regression_dropout', type=float, default=0.3, help="Dropout rate for the regression head.")
+    parser.add_argument('--weight_decay', type=float, default=1e-2, help="Weight decay")
     
     # Training Hyperparameters
     parser.add_argument('--epochs', type=int, default=10, help="Number of training epochs.")
