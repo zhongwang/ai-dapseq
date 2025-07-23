@@ -13,6 +13,7 @@ import logging
 from tqdm import tqdm
 import csv
 from scipy.stats import pearsonr
+import wandb
 
 # It's good practice to import the model from its source file
 # Add model directory to Python path to allow direct import
@@ -135,10 +136,60 @@ def train_model(args):
     setup()
     setup_logging(rank)
 
+    config_dict = None
+    if rank == 0:
+        # Initialize wandb on the main process
+        wandb.init(project="transformer_coexpression")
+        config_dict = wandb.config
+    
+    # Broadcast the config dictionary from rank 0 to all other processes
+    config_list = [config_dict]
+    dist.broadcast_object_list(config_list, src=0)
+    config = config_list[0]
+
+    # --- Handle templated paths for save_path and log_file ---
+    # This logic should be executed on all ranks to have the correct paths,
+    # but the path generation and directory creation happens only on rank 0.
+    if rank == 0:
+        if hasattr(config, 'save_path') and hasattr(config, 'log_file'):
+            # On rank 0, format the paths with the wandb run name
+            run_name = wandb.run.name
+            formatted_save_path = config.save_path.format(wandb_name=run_name)
+            formatted_log_file = config.log_file.format(wandb_name=run_name)
+
+            # Create directories if they don't exist
+            os.makedirs(os.path.dirname(formatted_save_path), exist_ok=True)
+            os.makedirs(os.path.dirname(formatted_log_file), exist_ok=True)
+            
+            logging.info(f"Run name: {run_name}")
+            logging.info(f"Final model save path: {formatted_save_path}")
+            logging.info(f"Training log file: {formatted_log_file}")
+
+            # Store formatted paths in a list for broadcasting
+            paths_to_broadcast = [formatted_save_path, formatted_log_file]
+        else:
+            # If templates are not in config, use paths from args and ensure dirs exist
+            # This is a fallback for runs not started with `wandb sweep`
+            logging.info("Using save_path and log_file from command line arguments.")
+            os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
+            os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+            paths_to_broadcast = [args.save_path, args.log_file]
+    else:
+        # Placeholder for other ranks to receive the broadcasted paths
+        paths_to_broadcast = [None, None]
+
+    # Broadcast the formatted paths from rank 0 to all other ranks
+    dist.broadcast_object_list(paths_to_broadcast, src=0)
+
+    # All ranks update their args with the correct paths received from rank 0
+    args.save_path = paths_to_broadcast[0]
+    args.log_file = paths_to_broadcast[1]
+
+
     # --- Data Loading ---
     if rank == 0:
         logging.info("Loading data...")
-        # Setup CSV log file
+        # Setup CSV log file, now using the potentially updated path
         with open(args.log_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
@@ -165,18 +216,19 @@ def train_model(args):
         if len(train_dataset) == 0 or len(val_dataset) == 0 or len(test_dataset) == 0:
              logging.warning("One or more dataset splits is empty. Check chromosome filtering logic and data.")
 
+    batch_size = config.batch_size if hasattr(config, 'batch_size') else args.batch_size
     # --- Dataloaders with DistributedSampler ---
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
-    train_loader = DataLoader(train_dataset, batch_size=args.batch_size, sampler=train_sampler, collate_fn=collate_fn, num_workers=args.num_workers)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=collate_fn, num_workers=args.num_workers)
     
     # Validation sampler needs to be distributed as well
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
-    val_loader = DataLoader(val_dataset, batch_size=args.batch_size, sampler=val_sampler, collate_fn=collate_fn)
+    val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler, collate_fn=collate_fn)
     
     # Test dataset is only used on rank 0, so it doesn't need a distributed sampler
     test_loader = None
     if rank == 0:
-        test_loader = DataLoader(test_dataset, batch_size=args.batch_size, collate_fn=collate_fn)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
     # --- Model Initialization ---
     # Infer input_feature_dim from a sample
@@ -185,21 +237,23 @@ def train_model(args):
     
     model = SiameseGeneTransformer(
         input_feature_dim=input_feature_dim,
-        d_model=args.d_model,
-        nhead=args.nhead,
-        num_encoder_layers=args.num_encoder_layers,
-        dim_feedforward=args.dim_feedforward,
-        dropout=args.dropout,
+        d_model=config.d_model if hasattr(config, 'd_model') else args.d_model,
+        nhead=config.nhead if hasattr(config, 'nhead') else args.nhead,
+        num_encoder_layers=config.num_encoder_layers if hasattr(config, 'num_encoder_layers') else args.num_encoder_layers,
+        dim_feedforward=config.dim_feedforward if hasattr(config, 'dim_feedforward') else args.dim_feedforward,
+        dropout=config.dropout if hasattr(config, 'dropout') else args.dropout,
         aggregation_method=args.aggregation_method,
         max_seq_len=args.max_seq_len,
-        regression_hidden_dim=args.regression_hidden_dim,
-        regression_dropout=args.regression_dropout
+        regression_hidden_dim=config.regression_hidden_dim if hasattr(config, 'regression_hidden_dim') else args.regression_hidden_dim,
+        regression_dropout=config.regression_dropout if hasattr(config, 'regression_dropout') else args.regression_dropout
     ).to(local_rank)
 
     ddp_model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     
     criterion = nn.MSELoss() # Mean Squared Error for regression
-    optimizer = optim.AdamW(ddp_model.parameters(), lr=args.learning_rate, weight_decay = args.weight_decay)
+    learning_rate = config.learning_rate if hasattr(config, 'learning_rate') else args.learning_rate
+    weight_decay = config.weight_decay if hasattr(config, 'weight_decay') else args.weight_decay
+    optimizer = optim.AdamW(ddp_model.parameters(), lr=learning_rate, weight_decay = weight_decay)
     
     best_val_loss = float('inf')
     epochs_no_improve = 0
@@ -296,6 +350,13 @@ def train_model(args):
             
             logging.info(f"Epoch {epoch+1}/{args.epochs} | Train Loss: {avg_train_loss:.4f} | Val Loss: {avg_val_loss:.4f} | Val Pearson R: {val_pearson_r:.4f} | Val MAE: {val_mae:.4f}")
 
+            wandb.log({
+                "epoch": epoch + 1,
+                "train_loss": avg_train_loss,
+                "val_loss": avg_val_loss,
+                "val_pearson_r": val_pearson_r,
+                "val_mae": val_mae,
+            })
             # Log to CSV
             with open(args.log_file, 'a', newline='') as f:
                 writer = csv.writer(f)
@@ -350,6 +411,8 @@ def train_model(args):
         
         avg_test_loss = total_test_loss / len(test_loader)
         logging.info(f"Final Test Loss: {avg_test_loss:.4f}")
+        wandb.log({"final_test_loss": avg_test_loss})
+
 
     cleanup()
 

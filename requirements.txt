@@ -19,3 +19,6 @@ hdbscan
 matplotlib
 seaborn
 umap
+
+# Model training
+wandb
