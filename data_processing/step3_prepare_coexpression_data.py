@@ -276,38 +276,7 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
 
     # Function to sample from bins using the set's minimum bin size
     # This function no longer needs the 'bins' argument as binning is done beforehand.
-    def sample_from_bins(df, min_samples_per_bin):
-        if df.empty or min_samples_per_bin == 0:
-            # Return empty df with relevant columns, dropping chromosome and bin columns
-            cols = ['Gene1', 'Gene2', 'Correlation']
-            return pd.DataFrame(columns=cols)
-
-        # The 'Correlation_Bin' column is expected to exist in the dataframe at this point
-        # after calculate_and_assign_bins_and_min_size has been called on it.
-
-        sampled_df = pd.DataFrame()
-        # Iterate through all unique bin labels in the current dataframe
-        # Use .dropna().unique() to handle potential NaN values in the bin column
-        # Also sort the unique labels to ensure consistent iteration order
-        # Only iterate through the bins that actually exist in the current dataframe
-        for bin_label in sorted(df['Correlation_Bin'].dropna().unique()):
-             # Ensure the bin_data is not empty before attempting to sample
-             bin_data = df[df['Correlation_Bin'] == bin_label]
-             if not bin_data.empty:
-                # Sample up to min_samples_per_bin for this specific set
-                # Ensure the number of samples does not exceed the available data in the bin
-                n_samples = min(len(bin_data), min_samples_per_bin)
-                if n_samples > 0:
-                    sampled_bin = bin_data.sample(n=n_samples, replace=False, random_state=42) # Use random_state for reproducibility
-                    sampled_df = pd.concat([sampled_df, sampled_bin])
-
-
-        # Drop the Correlation bin, and temporary chromosome columns
-        cols_to_drop = ['Correlation_Bin', 'Gene1_chr', 'Gene2_chr']
-        sampled_df = sampled_df.drop(columns=[col for col in cols_to_drop if col in sampled_df.columns], errors='ignore')
-        return sampled_df
-
-    def sample_from_bins_train(df, min_samples_per_bin, reduce_flag, num_bins):
+    def sample_from_bins(df, min_samples_per_bin, reduce_interior=False):
         if df.empty or min_samples_per_bin == 0:
             cols = ['Gene1', 'Gene2', 'Correlation']
             return pd.DataFrame(columns=cols)
@@ -320,7 +289,8 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
             if not bin_data.empty:
                 n_samples = min(len(bin_data), min_samples_per_bin)
                 
-                if reduce_flag and bin_label != bin_labels[0] and bin_label != bin_labels[-1]:
+                # If reduce_interior is True, sample half as many from interior bins
+                if reduce_interior and bin_label != bin_labels[0] and bin_label != bin_labels[-1]:
                     n_samples = min(len(bin_data), min_samples_per_bin // 2)
 
                 if n_samples > 0:
@@ -332,12 +302,12 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
         return sampled_df
 
     print("Sampling from bins for train, validation, and test sets using respective min bin sizes...")
-    # Pass the calculated minimum bin size for each set
-    # The 'Correlation_Bin' column is expected to exist in train_set, val_set, and test_set
-    # after the min bin size calculations.
-    sampled_train_set = sample_from_bins_train(train_set, min_train_bin_size, reduce_interior_bins_flag, num_bins)
-    sampled_val_set = sample_from_bins(val_set, min_val_bin_size)
-    sampled_test_set = sample_from_bins(test_set, min_test_bin_size)
+    # Apply special sampling only to the training set
+    sampled_train_set = sample_from_bins(train_set, min_train_bin_size, reduce_interior=reduce_interior_bins_flag)
+    
+    # Validation and test sets are sampled uniformly
+    sampled_val_set = sample_from_bins(val_set, min_val_bin_size, reduce_interior=False)
+    sampled_test_set = sample_from_bins(test_set, min_test_bin_size, reduce_interior=False)
 
     print(f"Sampled data: Train={len(sampled_train_set)} pairs, Validation={len(sampled_val_set)} pairs, Test={len(sampled_test_set)} pairs.")
 
