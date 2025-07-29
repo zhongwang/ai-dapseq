@@ -92,21 +92,50 @@ def plot_regression_metric_curves(logs_df, output_path_prefix="validation_metric
     plt.close()
     print(f"SUCCESS: MAE plot saved to {mae_plot_path}")
 
-def plot_predicted_vs_actual(predictions_df, output_path="predicted_vs_actual.png"):
-    """Creates a scatter plot of predicted vs. actual correlation coefficients."""
-    actual = predictions_df['actual_correlation']
-    predicted = predictions_df['predicted_correlation']
-    
-    pearson_r, _ = pearsonr(actual, predicted)
-    
+def plot_predicted_vs_actual(predictions_df: pd.DataFrame, output_path="predicted_vs_actual.png", sample_size: int = None):
+    """
+    Creates a scatter plot of predicted vs. actual correlation coefficients.
+    The Pearson R in the title is calculated for the *entire* dataset,
+    while the plot itself can show a sample.
+
+    Args:
+        predictions_df (pd.DataFrame): DataFrame with 'Actual_Correlation' and 'Predicted_Correlation' columns.
+        output_path (str): Path to save the plot image.
+        sample_size (int, optional): The number of data points to sample for plotting.
+                                     If None, all data points are plotted.
+                                     If the DataFrame has fewer rows than sample_size, all rows are used.
+    """
+    # --- Calculate Pearson R for the ENTIRE dataset FIRST ---
+    actual_full = predictions_df['Actual_Correlation']
+    predicted_full = predictions_df['Predicted_Correlation']
+    pearson_r_full, _ = pearsonr(actual_full, predicted_full)
+    print(f"Pearson R for the entire dataset: {pearson_r_full:.3f}")
+
+    # --- Determine the data to plot (full or sampled) ---
+    if sample_size is not None and len(predictions_df) > sample_size:
+        # Sample the DataFrame if sample_size is provided and data is larger
+        # Using random_state for reproducibility of the sample
+        data_to_plot = predictions_df.sample(n=sample_size, random_state=42)
+        print(f"Plotting a sample of {len(data_to_plot)} data points.")
+    else:
+        data_to_plot = predictions_df
+        if sample_size is not None:
+            print(f"Sample size ({sample_size}) is greater than or equal to total data points ({len(predictions_df)}). Plotting all data.")
+        else:
+            print(f"Plotting all {len(data_to_plot)} data points.")
+
+    actual_plot = data_to_plot['Actual_Correlation']
+    predicted_plot = data_to_plot['Predicted_Correlation']
+
     plt.figure(figsize=(8, 8))
-    sns.scatterplot(x=actual, y=predicted, alpha=0.6)
-    plt.plot([min(actual.min(), predicted.min()), max(actual.max(), predicted.max())],
-             [min(actual.min(), predicted.min()), max(actual.max(), predicted.max())],
+    sns.scatterplot(x=actual_plot, y=predicted_plot, alpha=0.6)
+    plt.plot([min(actual_plot.min(), predicted_plot.min()), max(actual_plot.max(), predicted_plot.max())],
+             [min(actual_plot.min(), predicted_plot.min()), max(actual_plot.max(), predicted_plot.max())],
              'k--', lw=2, label="y=x (Ideal)") # y=x line
     plt.xlabel('Actual Correlation Coefficient')
     plt.ylabel('Predicted Correlation Coefficient')
-    plt.title(f'Predicted vs. Actual Correlation Coefficients\nPearson R: {pearson_r:.3f}')
+    # --- Use the pearson_r_full in the title ---
+    plt.title(f'Predicted vs. Actual Correlation Coefficients\nPearson R: {pearson_r_full:.3f}')
     plt.legend()
     plt.grid(True)
     plt.axis('equal') # Ensure aspect ratio is equal
@@ -114,10 +143,11 @@ def plot_predicted_vs_actual(predictions_df, output_path="predicted_vs_actual.pn
     plt.close()
     print(f"SUCCESS: Predicted vs. Actual scatter plot saved to {output_path}")
 
+
 def plot_residual_plot(predictions_df, output_path="residual_plot.png"):
     """Plots residuals against predicted values."""
-    actual = predictions_df['actual_correlation']
-    predicted = predictions_df['predicted_correlation']
+    actual = predictions_df['Actual_Correlation']
+    predicted = predictions_df['Predicted_Correlation']
     residuals = actual - predicted
     
     plt.figure(figsize=(10, 6))
@@ -140,6 +170,7 @@ def parse_arguments():
                         help="Path to the CSV file containing actual vs. predicted correlations.")
     parser.add_argument("--output_dir", type=str, default="./visualization_plots",
                         help="Directory to save the output plots (default: ./visualization_plots).")
+    parser.add_argument("--sample_size", type = int, default = 1000, required = False)
     return parser.parse_args()
 
 def main():
@@ -198,7 +229,7 @@ def main():
         print(f"WARNING: No training log data to plot. Logs path was: {training_logs_path}")
 
     if predictions_df is not None and not predictions_df.empty:
-        plot_predicted_vs_actual(predictions_df, output_path=os.path.join(output_dir, "predicted_vs_actual.png"))
+        plot_predicted_vs_actual(predictions_df, output_path=os.path.join(output_dir, "predicted_vs_actual.png"), sample_size = args.sample_size)
         plot_residual_plot(predictions_df, output_path=os.path.join(output_dir, "residual_plot.png"))
     else:
         print(f"WARNING: No prediction data to plot. Predictions path was: {predictions_path}")

@@ -12,9 +12,10 @@ def parse_arguments():
     parser.add_argument("--output_file", required=True, help="Path to the output final co-expression TSV file.")
     parser.add_argument("--validate_genes", action='store_true', help="If set, validate that gene IDs in the coexpression file have corresponding processed signal files in --processed_signals_dir.")
     parser.add_argument("--num_bins", type=int, default=1000, help="Number of bins to use for correlation-based sampling of the training set. Default is 1000.")
+    parser.add_argument("--reduce_interior_bins", action='store_true', help="If set, sample half as many samples from the interior bins for the training set.")
     return parser.parse_args()
 
-def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_path, output_file_path, num_bins, processed_signals_dir_path=None, validate_genes_flag=False):
+def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_path, output_file_path, num_bins, processed_signals_dir_path=None, validate_genes_flag=False, reduce_interior_bins_flag=False):
     """
     Loads, optionally validates, splits by chromosome, samples by correlation bin, and saves co-expression data.
 
@@ -306,11 +307,35 @@ def prepare_coexpression_data(coexpression_file_path, gene_chromosome_map_file_p
         sampled_df = sampled_df.drop(columns=[col for col in cols_to_drop if col in sampled_df.columns], errors='ignore')
         return sampled_df
 
+    def sample_from_bins_train(df, min_samples_per_bin, reduce_flag, num_bins):
+        if df.empty or min_samples_per_bin == 0:
+            cols = ['Gene1', 'Gene2', 'Correlation']
+            return pd.DataFrame(columns=cols)
+
+        sampled_df = pd.DataFrame()
+        bin_labels = sorted(df['Correlation_Bin'].dropna().unique())
+        
+        for bin_label in bin_labels:
+            bin_data = df[df['Correlation_Bin'] == bin_label]
+            if not bin_data.empty:
+                n_samples = min(len(bin_data), min_samples_per_bin)
+                
+                if reduce_flag and bin_label != bin_labels[0] and bin_label != bin_labels[-1]:
+                    n_samples = min(len(bin_data), min_samples_per_bin // 2)
+
+                if n_samples > 0:
+                    sampled_bin = bin_data.sample(n=n_samples, replace=False, random_state=42)
+                    sampled_df = pd.concat([sampled_df, sampled_bin])
+
+        cols_to_drop = ['Correlation_Bin', 'Gene1_chr', 'Gene2_chr']
+        sampled_df = sampled_df.drop(columns=[col for col in cols_to_drop if col in sampled_df.columns], errors='ignore')
+        return sampled_df
+
     print("Sampling from bins for train, validation, and test sets using respective min bin sizes...")
     # Pass the calculated minimum bin size for each set
     # The 'Correlation_Bin' column is expected to exist in train_set, val_set, and test_set
     # after the min bin size calculations.
-    sampled_train_set = sample_from_bins(train_set, min_train_bin_size)
+    sampled_train_set = sample_from_bins_train(train_set, min_train_bin_size, reduce_interior_bins_flag, num_bins)
     sampled_val_set = sample_from_bins(val_set, min_val_bin_size)
     sampled_test_set = sample_from_bins(test_set, min_test_bin_size)
 
@@ -346,7 +371,8 @@ if __name__ == "__main__":
         args.output_file,
         args.num_bins,
         args.processed_signals_dir,
-        args.validate_genes
+        args.validate_genes,
+        args.reduce_interior_bins
     )
     print("Step 3.4: Co-expression data preparation finished.")
 
