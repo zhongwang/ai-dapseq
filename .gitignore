@@ -1,2 +1,3 @@
 output/*
-
+training/train_array.sh
+training/train_parallel_test.sh

@@ -1,4 +1,4 @@
-program: ./training/train_siamese_transformer.py
+program: ./training/train_siamese_transformer_wandb.py
 method: bayes
 metric:
   name: val_loss
@@ -6,13 +6,13 @@ metric:
 
 parameters:
   d_model:
-    values: [512, 789, 1024]
+    values: [512, 1024]
   nhead:
     values: [8]
   num_encoder_layers:
     values: [2, 4, 6]
   dim_feedforward:
-    values: [1024, 1578, 2048]
+    values: [1024, 2048]
   dropout:
     distribution: uniform
     min: 0.2
@@ -33,26 +33,22 @@ parameters:
     distribution: log_uniform_values
     min: !!float 1e-3
     max: !!float 1e-1
-
   epochs:
-    value: 3
+    value: 5
   feature_dir:
     value: "./output/new_full_data/feature_vectors"
   pairs_file: 
     value: "./output/new_full_data/final_coexpressed_regression.txt"
   gene_info_file:
     value: "./output/new_full_data/promoter_sequences.txt"
-
   save_path:
-    value: "./output/new_full_data/wandb_sweep/{wandb_name}/best_siamese_model.save_path"
+    value: "./output/new_full_data/wandb_sweep/{wandb_name}/best_siamese_model.pth" 
   log_file:
     value: "./output/new_full_data/wandb_sweep/{wandb_name}/training_log.csv"
-
 
 command:
   - ${env}
   - torchrun
-  - --nproc_per_node=2
+  - --nproc_per_node=8
   - ${program}
   - ${args}
-  

@@ -15,7 +15,6 @@ import csv
 from scipy.stats import pearsonr
 import wandb
 
-# It's good practice to import the model from its source file
 # Add model directory to Python path to allow direct import
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -122,7 +121,7 @@ def collate_fn(batch):
         'promoter_sequence_B': padded_vec2s,
         'key_padding_mask_A': mask1,
         'key_padding_mask_B': mask2,
-        'labels': correlations.unsqueeze(1) # Ensure shape is (batch_size, 1)
+        'labels': correlations.unsqueeze(1)  # Ensure shape is (batch_size, 1)
     }
 
 # --- Main Training Function ---
@@ -133,6 +132,9 @@ def train_model(args):
     rank = int(os.environ['RANK'])
     world_size = int(os.environ['WORLD_SIZE'])
     
+    # Set the CUDA device for this process
+    torch.cuda.set_device(local_rank)
+    
     setup()
     setup_logging(rank)
 
@@ -140,7 +142,7 @@ def train_model(args):
     if rank == 0:
         # Initialize wandb on the main process
         wandb.init(project="transformer_coexpression")
-        config_dict = wandb.config
+        config_dict = dict(wandb.config)  # Convert to plain dict for picklability
     
     # Broadcast the config dictionary from rank 0 to all other processes
     config_list = [config_dict]
@@ -148,14 +150,12 @@ def train_model(args):
     config = config_list[0]
 
     # --- Handle templated paths for save_path and log_file ---
-    # This logic should be executed on all ranks to have the correct paths,
-    # but the path generation and directory creation happens only on rank 0.
     if rank == 0:
-        if hasattr(config, 'save_path') and hasattr(config, 'log_file'):
+        if 'save_path' in config and 'log_file' in config:
             # On rank 0, format the paths with the wandb run name
             run_name = wandb.run.name
-            formatted_save_path = config.save_path.format(wandb_name=run_name)
-            formatted_log_file = config.log_file.format(wandb_name=run_name)
+            formatted_save_path = config['save_path'].format(wandb_name=run_name)
+            formatted_log_file = config['log_file'].format(wandb_name=run_name)
 
             # Create directories if they don't exist
             os.makedirs(os.path.dirname(formatted_save_path), exist_ok=True)
@@ -168,28 +168,27 @@ def train_model(args):
             # Store formatted paths in a list for broadcasting
             paths_to_broadcast = [formatted_save_path, formatted_log_file]
         else:
-            # If templates are not in config, use paths from args and ensure dirs exist
-            # This is a fallback for runs not started with `wandb sweep`
+            # Fallback for non-sweep runs
             logging.info("Using save_path and log_file from command line arguments.")
             os.makedirs(os.path.dirname(args.save_path), exist_ok=True)
             os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
             paths_to_broadcast = [args.save_path, args.log_file]
     else:
-        # Placeholder for other ranks to receive the broadcasted paths
         paths_to_broadcast = [None, None]
 
-    # Broadcast the formatted paths from rank 0 to all other ranks
     dist.broadcast_object_list(paths_to_broadcast, src=0)
-
-    # All ranks update their args with the correct paths received from rank 0
     args.save_path = paths_to_broadcast[0]
     args.log_file = paths_to_broadcast[1]
 
-
     # --- Data Loading ---
+    # Use absolute paths to ensure robustness
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+    args.pairs_file = os.path.join(repo_root, args.pairs_file.lstrip('./'))
+    args.feature_dir = os.path.join(repo_root, args.feature_dir.lstrip('./'))
+    args.gene_info_file = os.path.join(repo_root, args.gene_info_file.lstrip('./'))
+
     if rank == 0:
         logging.info("Loading data...")
-        # Setup CSV log file, now using the potentially updated path
         with open(args.log_file, 'w', newline='') as f:
             writer = csv.writer(f)
             writer.writerow(['epoch', 'train_loss', 'val_loss', 'val_pearson_r', 'val_mae'])
@@ -214,60 +213,61 @@ def train_model(args):
     if rank == 0:
         logging.info(f"Dataset sizes: Train={len(train_dataset)}, Val={len(val_dataset)}, Test={len(test_dataset)}")
         if len(train_dataset) == 0 or len(val_dataset) == 0 or len(test_dataset) == 0:
-             logging.warning("One or more dataset splits is empty. Check chromosome filtering logic and data.")
+            logging.warning("One or more dataset splits is empty. Check chromosome filtering logic and data.")
 
-    batch_size = config.batch_size if hasattr(config, 'batch_size') else args.batch_size
+    batch_size = config.get('batch_size', args.batch_size)
     # --- Dataloaders with DistributedSampler ---
     train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank)
     train_loader = DataLoader(train_dataset, batch_size=batch_size, sampler=train_sampler, collate_fn=collate_fn, num_workers=args.num_workers)
     
-    # Validation sampler needs to be distributed as well
     val_sampler = DistributedSampler(val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, sampler=val_sampler, collate_fn=collate_fn)
     
-    # Test dataset is only used on rank 0, so it doesn't need a distributed sampler
     test_loader = None
     if rank == 0:
         test_loader = DataLoader(test_dataset, batch_size=batch_size, collate_fn=collate_fn)
 
     # --- Model Initialization ---
-    # Infer input_feature_dim from a sample
     sample_vec = train_dataset[0]['vec1']
     input_feature_dim = sample_vec.shape[1]
     
+    # Validate d_model and nhead compatibility
+    d_model = config.get('d_model', args.d_model)
+    nhead = config.get('nhead', args.nhead)
+    if d_model % nhead != 0:
+        raise ValueError(f"d_model ({d_model}) must be divisible by nhead ({nhead}) for MultiheadAttention.")
+
     model = SiameseGeneTransformer(
         input_feature_dim=input_feature_dim,
-        d_model=config.d_model if hasattr(config, 'd_model') else args.d_model,
-        nhead=config.nhead if hasattr(config, 'nhead') else args.nhead,
-        num_encoder_layers=config.num_encoder_layers if hasattr(config, 'num_encoder_layers') else args.num_encoder_layers,
-        dim_feedforward=config.dim_feedforward if hasattr(config, 'dim_feedforward') else args.dim_feedforward,
-        dropout=config.dropout if hasattr(config, 'dropout') else args.dropout,
+        d_model=d_model,
+        nhead=nhead,
+        num_encoder_layers=config.get('num_encoder_layers', args.num_encoder_layers),
+        dim_feedforward=config.get('dim_feedforward', args.dim_feedforward),
+        dropout=config.get('dropout', args.dropout),
         aggregation_method=args.aggregation_method,
         max_seq_len=args.max_seq_len,
-        regression_hidden_dim=config.regression_hidden_dim if hasattr(config, 'regression_hidden_dim') else args.regression_hidden_dim,
-        regression_dropout=config.regression_dropout if hasattr(config, 'regression_dropout') else args.regression_dropout
+        regression_hidden_dim=config.get('regression_hidden_dim', args.regression_hidden_dim),
+        regression_dropout=config.get('regression_dropout', args.regression_dropout)
     ).to(local_rank)
 
     ddp_model = DDP(model, device_ids=[local_rank], output_device=local_rank)
     
-    criterion = nn.MSELoss() # Mean Squared Error for regression
-    learning_rate = config.learning_rate if hasattr(config, 'learning_rate') else args.learning_rate
-    weight_decay = config.weight_decay if hasattr(config, 'weight_decay') else args.weight_decay
-    optimizer = optim.AdamW(ddp_model.parameters(), lr=learning_rate, weight_decay = weight_decay)
+    criterion = nn.MSELoss()
+    learning_rate = config.get('learning_rate', args.learning_rate)
+    weight_decay = config.get('weight_decay', args.weight_decay)
+    optimizer = optim.AdamW(ddp_model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     
     best_val_loss = float('inf')
     epochs_no_improve = 0
 
     # --- Training Loop ---
     for epoch in range(args.epochs):
-        train_sampler.set_epoch(epoch) # Ensure shuffling is different each epoch
+        train_sampler.set_epoch(epoch)
         ddp_model.train()
         total_train_loss = 0
         
-        # Add tqdm for progress bar, only on the main rank
         train_loader_tqdm = tqdm(train_loader, desc=f"Epoch {epoch+1}/{args.epochs} Training", disable=(rank != 0))
         for batch in train_loader_tqdm:
-            # Move data to the correct device
             for key, value in batch.items():
                 if isinstance(value, torch.Tensor):
                     batch[key] = value.to(local_rank)
@@ -281,7 +281,7 @@ def train_model(args):
                 'key_padding_mask_B': batch['key_padding_mask_B']
             }
 
-            outputs = ddp_model(**model_inputs) # Pass dictionary directly
+            outputs = ddp_model(**model_inputs)
             loss = criterion(outputs, batch['labels'])
             loss.backward()
             optimizer.step()
@@ -312,39 +312,30 @@ def train_model(args):
                 loss = criterion(outputs, batch['labels'])
                 total_val_loss += loss.item()
 
-                # Gather predictions and labels on the current GPU device
                 all_val_preds.append(outputs)
                 all_val_labels.append(batch['labels'])
 
-        # Combine predictions and labels from all batches on the current GPU
         all_val_preds = torch.cat(all_val_preds)
         all_val_labels = torch.cat(all_val_labels)
         
-        # Collect results from all processes
         if world_size > 1:
-            # Tensors for gathering must be on the correct device (GPU).
             gathered_preds = [torch.zeros_like(all_val_preds, device=local_rank) for _ in range(world_size)]
             gathered_labels = [torch.zeros_like(all_val_labels, device=local_rank) for _ in range(world_size)]
             
-            # Perform the all_gather operation on GPU tensors.
             dist.all_gather(gathered_preds, all_val_preds)
             dist.all_gather(gathered_labels, all_val_labels)
 
             if rank == 0:
-                # On rank 0, concatenate results and move to CPU for metrics.
                 all_val_preds = torch.cat(gathered_preds).cpu()
                 all_val_labels = torch.cat(gathered_labels).cpu()
         else:
-            # If not distributed, just move results to CPU for metrics.
             all_val_preds = all_val_preds.cpu()
             all_val_labels = all_val_labels.cpu()
         
         avg_val_loss = total_val_loss / len(val_loader)
 
-        # Log, save model, and check for early stopping only on the main process
         stop_signal = torch.tensor(0.0, device=local_rank)
         if rank == 0:
-            # Calculate metrics on rank 0 with all data (now on CPU)
             val_mae = nn.L1Loss()(all_val_preds, all_val_labels).item()
             val_pearson_r, _ = pearsonr(all_val_preds.numpy().flatten(), all_val_labels.numpy().flatten())
             
@@ -357,7 +348,6 @@ def train_model(args):
                 "val_pearson_r": val_pearson_r,
                 "val_mae": val_mae,
             })
-            # Log to CSV
             with open(args.log_file, 'a', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow([epoch + 1, avg_train_loss, avg_val_loss, val_pearson_r, val_mae])
@@ -375,7 +365,6 @@ def train_model(args):
                 logging.info(f"Early stopping triggered after {args.early_stopping_patience} epochs with no improvement.")
                 stop_signal.fill_(1.0)
         
-        # Broadcast the stop signal to all processes. If it's 1, everyone stops.
         dist.broadcast(stop_signal, src=0)
         
         if stop_signal.item() == 1.0:
@@ -384,8 +373,6 @@ def train_model(args):
     # --- Final Test Evaluation (on rank 0) ---
     if rank == 0:
         logging.info("Starting final evaluation on the test set...")
-        # Load the best model onto the correct device for the main process
-        # Use map_location to load onto the CPU first, then move to the GPU
         model.load_state_dict(torch.load(args.save_path, map_location='cpu'))
         model.to(local_rank)
         model.eval()
@@ -412,7 +399,6 @@ def train_model(args):
         avg_test_loss = total_test_loss / len(test_loader)
         logging.info(f"Final Test Loss: {avg_test_loss:.4f}")
         wandb.log({"final_test_loss": avg_test_loss})
-
 
     cleanup()
 
@@ -448,12 +434,12 @@ def main():
 
     args = parser.parse_args()
 
-    # WORLD_SIZE is set by torchrun. If it's not set, we can't proceed.
     if 'WORLD_SIZE' not in os.environ:
         sys.exit("This script is designed to be run with 'torchrun'.\n"
-                 "Please launch it using: torchrun --nproc_per_node=NUM_GPUS train_siamese_transformer.py [ARGS]")
+                 "Please launch it using: torchrun --nproc_per_node=NUM_GPUS train_siamese_transformer_new3.py [ARGS]")
 
     train_model(args)
 
 if __name__ == '__main__':
     main()
+

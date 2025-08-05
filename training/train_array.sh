@@ -16,4 +16,4 @@ cd /global/scratch/users/sallyliao2027/aidapseq
 source .venv/bin/activate
 
 export WANDB_DISABLE_GPU_SETUP=true
-wandb agent sallyliao-northwestern-university/transformer_coexpression/nluyxc9a
+wandb agent sallyliao-northwestern-university/transformer_coexpression/f3fenv7l
