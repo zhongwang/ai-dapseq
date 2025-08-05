@@ -82,6 +82,7 @@ ai-dapseq/
 │   ├── step3_prepare_coexpression_data.py
 │   └── step4_create_clustered_feature_vectors.py
 │   └── step4_create_feature_vectors.py
+│   └── tokenize.sh
 ├── docs/
 │   ├── implementation_plan_overview.md
 │   ├── module_1_data_preprocessing.md
