@@ -34,18 +34,36 @@ The scripts in the `data_processing/` directory should generally be run in the f
 *   `python data_processing/step1_extract_promoter_sequences.py`: Extracts promoter sequences.
 *   `python data_processing/step2_extract_tf_binding_signals.py`: Extracts TF binding signals.
 *   `python data_processing/step3_prepare_coexpression_data.py`: Prepares gene co-expression data.
-*   `python data_processing/step4_create_tokenized_feature_vectors.py`: Creates tokenized feature vectors for the model.
+*   `python data_processing/step4_create_feature_vectors.py`: Creates feature vectors for the model.
 
 Auxiliary scripts:
 *   `python data_processing/plot_normalization_effects.py`: Plots the effects of normalization (can be run after relevant data processing steps).
+*   `python data_processing/count_chromosomal_pairs.py`: Prints out the total number of pairs within a chromosome over a set threshold. Change this threshold by changing line 55. 
+*   `python data_processing/step1_5_rename_geneID.py`: If step 1 was done without cleaned gene IDs, run this script in between steps 1 and 2 to clean the IDs.
+*   `python data_processing/step2_5_rename_signals.py`: If step 2 was done without cleaned gene IDs, run this script in between steps 2 and 3 to clean the IDs.
+*   `python data_processing/step4_create_clustered_feature_vectors.py`: An alternate tokenization method involving creating clusters with base pair windows. Run instead of data_processing/step4_create_feature_vectors.py if you want to use this clustering method. 
+*   `sbatch data_processing/tokenize.sh`: Run this shell script to use the clustered tokenization method, changing relevant sbatch parameters.
 
 ### 2. Model Training
 
-*   `python training/train.py`: Trains the Siamese transformer model using the processed data.
+To run the model without hyperparameter tuning, deploy a script similar to the following scripts to a HPC:
+*   `sbatch training/train.sh` 
+*   `sbatch training/train_a40.sh`
+These two scripts do the same thing; the only difference is that the first uses H100 GPUs, while the second uses A40 GPUs. 
+
+To run the model with a wandb sweep, which helps tune the hyperparameters, first sign into the wandb library. If you're new to wandb, refer to the following link to set up a wandb account and syncing: https://docs.wandb.ai/quickstart/. Once you set up your wandb account, run scripts in the following order, modifying relevant paths, parameters, and the unique wandb agent code. 
+*   `wandb sweep training/sweep.yaml`: Creates the wandb sweep such that you can track metrics on the wandb website. Also generates a unique wandb agent code, which should be added to the next sbatch script. 
+*   `sbatch training/train_array.sh`: Submits the job to run the wandb sweep. Ensure that you update the wandb agent code, relevant hyperparameters, and paths. 
+
+If you do not have access to distributed GPUs, you may run `python data_processing/train.py` instead. 
 
 ### 3. Visualization
+To get the test predictions and performance plots, run the following
+*   `python data_processing/validate.py`: Gets the test predictions the trained model.
+*   `python visualization/plot_performance_metrics.py`: Uses the test predictions to generate performance plots.
 
-*   `python visualization/plot_performance_metrics.py`: Plots performance metrics of the trained model.
+Auxiliary scripts: 
+*   `python visualization/plot_target_distribution.py`: Plots the distribution of the target variable (in our case, co-expression correlation).
 
 *Note: You may need to adjust paths and parameters within the scripts or provide them as command-line arguments if the scripts are designed to accept them.*
 
@@ -58,9 +76,12 @@ ai-dapseq/
 ├── data_processing/
 │   ├── plot_normalization_effects.py
 │   ├── step1_extract_promoter_sequences.py
+│   ├── step1_5_rename_geneID.py
 │   ├── step2_extract_tf_binding_signals.py
+│   ├── step2_5_rename_signals.py
 │   ├── step3_prepare_coexpression_data.py
-│   └── step4_create_tokenized_feature_vectors.py
+│   └── step4_create_clustered_feature_vectors.py
+│   └── step4_create_feature_vectors.py
 ├── docs/
 │   ├── implementation_plan_overview.md
 │   ├── module_1_data_preprocessing.md
@@ -73,9 +94,18 @@ ai-dapseq/
 │   └── siamese_transformer.py
 ├── requirements.txt
 ├── training/
+│   └── sweep.yaml
+│   └── train_a40.sh
+│   └── train_array.sh
+│   └── train_parallel_test.sh
+│   └── train_siamese_transformer_wandb.py
+│   └── train_siamese_transformer.py
 │   └── train.py
+│   └── train.sh
+│   └── validate.py
 └── visualization/
     └── plot_performance_metrics.py
+    └── plot_target_distribution.py
 ```
 
 ## Modules

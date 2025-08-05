@@ -3,13 +3,6 @@ import sys
 from collections import Counter
 import argparse
 
-# This function is no longer needed as we will use a map file
-# def extract_chromosome(gene_id):
-#     """Extracts the chromosome identifier from a gene ID."""
-#     if isinstance(gene_id, str):
-#         return gene_id.split('_')[0]
-#     return None
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Count within-chromosome gene pairs using a correlation file and a gene-to-chromosome map file.')
     parser.add_argument('--correlation_file', help='Path to the input TSV file with columns Gene1, Gene2, and Correlation.')
